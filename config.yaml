@@ -10,4 +10,4 @@ translation:
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
   batch_size: 10
-  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs."
+  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...<rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. The text is for a presentation slide. Full sentences are not required (e.g., use 'Difficult to...' instead of 'It is difficult to...'). Keep the translation simple and concise. Keep the translation under {max_chars} characters (excluding tags)."

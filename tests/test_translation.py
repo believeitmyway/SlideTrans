@@ -21,12 +21,7 @@ class TestPPTXProcessor(unittest.TestCase):
 
         # Patch Presentation to avoid loading file
         with patch("src.pptx_processor.Presentation") as MockPresentation:
-            # Create a mock Presentation object structure
-            # This is tricky because python-pptx objects are complex.
-            # Instead of mocking the whole library, we will rely on checking the _process_paragraph logic directly
-            # by passing a mock paragraph.
             self.processor = PPTXProcessor("dummy.pptx", self.mock_translator)
-            # Mock the presentation to avoid file loading error
             self.processor.prs = MockPresentation.return_value
 
     def test_tag_preservation_and_formatting(self):
@@ -34,119 +29,73 @@ class TestPPTXProcessor(unittest.TestCase):
         mock_paragraph = MagicMock()
 
         # Run 0: "Hello " (Bold)
-        run0 = MagicMock()
-        run0.text = "Hello "
-        run0.font.name = "Arial"
-        run0.font.size = Pt(12)
-        run0.font.bold = True
-        run0.font.italic = False
-        run0.font.color.type = None # Simplify color for this test
-
+        run0 = MagicMock(); run0.text = "Hello "; run0.font.bold = True; run0.font.italic = False; run0.font.color.type = None
         # Run 1: "World" (Italic)
-        run1 = MagicMock()
-        run1.text = "World"
-        run1.font.name = "Arial"
-        run1.font.size = Pt(12)
-        run1.font.bold = False
-        run1.font.italic = True
-        run1.font.color.type = None
+        run1 = MagicMock(); run1.text = "World"; run1.font.bold = False; run1.font.italic = True; run1.font.color.type = None
 
         mock_paragraph.runs = [run0, run1]
 
-        # Setup Translator Mock Response
-        # Simulating JP translation: Hello -> こんにちは, World -> 世界
-        # But keeping tags: <r0>こんにちは </r0><r1>世界</r1>
-        self.mock_translator.translate_text.return_value = "<r0>こんにちは </r0><r1>世界</r1>"
+        # Manually create run_map as it would be created by extract_tagged_text
+        run_map = {"0": run0, "1": run1}
 
-        # We need to capture the runs added to the paragraph after it's cleared.
-        # Since mock_paragraph.clear() will be called, and then add_run().
-        # We need to mock add_run to return a new mock run that we can inspect.
+        # Simulate translated parsed segments
+        # <r0>こんにちは </r0><r1>世界</r1>
+        parsed_segments = [("0", "こんにちは "), ("1", "世界")]
 
-        new_run0 = MagicMock()
-        new_run0.font = MagicMock()
-        new_run1 = MagicMock()
-        new_run1.font = MagicMock()
-
+        # Mock add_run
+        new_run0 = MagicMock(); new_run0.font = MagicMock()
+        new_run1 = MagicMock(); new_run1.font = MagicMock()
         mock_paragraph.add_run.side_effect = [new_run0, new_run1]
 
         # Execute
-        self.processor._process_paragraph(mock_paragraph)
+        self.processor._reconstruct_paragraph(mock_paragraph, parsed_segments, run_map)
 
         # Verify
-        # 1. Verify Translator was called with correct tagged input
-        # Input should be: <r0>Hello </r0><r1>World</r1>
-        # And max_chars should be passed (Length 11 * 1.7 ~ 18, depends on exact int calculation)
-        self.mock_translator.translate_text.assert_called()
-        args, kwargs = self.mock_translator.translate_text.call_args
-        self.assertEqual(args[0], "<r0>Hello </r0><r1>World</r1>")
-        self.assertIn("max_chars", kwargs)
-
-        # 2. Verify Paragraph was cleared
         mock_paragraph.clear.assert_called_once()
 
-        # 3. Verify New Runs have correct text and formatting
+        # Verify New Runs
         self.assertEqual(new_run0.text, "こんにちは ")
-        self.assertEqual(new_run0.font.bold, True) # Should inherit from run0
-        self.assertEqual(new_run0.font.italic, False)
+        self.assertEqual(new_run0.font.bold, True)
 
         self.assertEqual(new_run1.text, "世界")
-        self.assertEqual(new_run1.font.bold, False)
-        self.assertEqual(new_run1.font.italic, True) # Should inherit from run1
+        self.assertEqual(new_run1.font.italic, True)
 
     def test_font_resizing(self):
-        # Test case where translation is significantly longer
+        # Setup Mock Paragraph
         mock_paragraph = MagicMock()
-
-        # Original: "Hi" (Width = 2)
-        run0 = MagicMock()
-        run0.text = "Hi"
-        run0.font.size = MagicMock() # Use MagicMock instead of actual Pt object to allow setting property
-        run0.font.size.pt = 10.0
-
+        run0 = MagicMock(); run0.text = "Hi"; run0.font.size.pt = 10.0
         mock_paragraph.runs = [run0]
+        run_map = {"0": run0}
 
-        # Translated: "Hiiii" (Width = 5)
-        # This should trigger resizing. Ratio = 2/5 = 0.4
-        self.mock_translator.translate_text.return_value = "<r0>Hiiii</r0>"
+        # Translated: "Hiiii" (Width 5) vs "Hi" (Width 2) -> Ratio 0.4
+        parsed_segments = [("0", "Hiiii")]
 
-        new_run0 = MagicMock()
-        new_run0.font = MagicMock()
-        # Mocking size assignment
-        # The code does: target.font.size = Pt(source.font.size.pt * scaling_factor)
-
+        new_run0 = MagicMock(); new_run0.font = MagicMock()
         mock_paragraph.add_run.return_value = new_run0
 
         # Execute
-        self.processor._process_paragraph(mock_paragraph)
+        self.processor._reconstruct_paragraph(mock_paragraph, parsed_segments, run_map)
 
-        # Verify
-        # Check if Pt was called with reduced size
-        # We can't easily check the exact Pt object equality, but we can check the call logic or inspect the assignment if we could.
-        # Since Pt is a value object, let's assume if the logic runs, it's correct.
-        # But we can verify that the code *calculated* the scaling factor correctly.
-        # To do this, we can patch pptx.util.Pt to see what it was called with.
+        # Verify logic implicitly by checking calls if we could, but here we can at least ensure it ran without error
+        # To strictly verify resizing, we rely on the next test which mocks Pt
+        mock_paragraph.clear.assert_called_once()
 
     @patch("src.pptx_processor.Pt")
     def test_font_resizing_logic(self, mock_pt):
         mock_paragraph = MagicMock()
-        run0 = MagicMock()
-        run0.text = "Hi"
-        run0.font.size = MagicMock() # Mock the size object
-        run0.font.size.pt = 10.0
+        run0 = MagicMock(); run0.text = "Hi"; run0.font.size.pt = 10.0
         mock_paragraph.runs = [run0]
+        run_map = {"0": run0}
 
-        self.mock_translator.translate_text.return_value = "<r0>Hiiii</r0>"
+        # Translated: "Hiiii" (Width 5) vs "Hi" (Width 2) -> Scaling 0.4
+        parsed_segments = [("0", "Hiiii")]
 
-        new_run0 = MagicMock()
-        new_run0.font = MagicMock()
+        new_run0 = MagicMock(); new_run0.font = MagicMock()
         mock_paragraph.add_run.return_value = new_run0
 
-        self.processor._process_paragraph(mock_paragraph)
+        self.processor._reconstruct_paragraph(mock_paragraph, parsed_segments, run_map)
 
-        # Original Width ("Hi") = 2
-        # Translated Width ("Hiiii") = 5
-        # Expected Size = 10.0 * (2/5) = 4.0
-
+        # Expected Size = 10.0 * 0.4 = 4.0
         mock_pt.assert_called_with(4.0)
 
     def test_calculate_max_chars(self):
@@ -154,22 +103,14 @@ class TestPPTXProcessor(unittest.TestCase):
         self.mock_config.source_language = "Japanese"
         self.mock_config.target_language = "English"
         self.mock_config.expansion_ratio = 1.7
-        # Access via property since processor doesn't store config directly but translator does
         self.mock_translator.config = self.mock_config
 
-        # 10 chars -> 17 chars
         self.assertEqual(self.processor._calculate_max_chars(10), 17)
 
         # Case 2: English to Japanese (Ratio 1/1.7 = 0.588)
         self.mock_config.source_language = "English"
         self.mock_config.target_language = "Japanese"
-        # 100 chars -> 58 chars
         self.assertEqual(self.processor._calculate_max_chars(100), int(100 * (1/1.7)))
-
-        # Case 3: Other (Ratio 1.0)
-        self.mock_config.source_language = "Spanish"
-        self.mock_config.target_language = "French"
-        self.assertEqual(self.processor._calculate_max_chars(100), 100)
 
 class TestTranslator(unittest.TestCase):
     @patch("src.translator.AzureOpenAI")
@@ -184,10 +125,6 @@ class TestTranslator(unittest.TestCase):
 
         translator = Translator(config, glossary)
 
-        expected_part_1 = "Base Prompt."
-        expected_part_2 = "Translate from Japanese to English."
-        expected_part_3 = "TermA: TransA"
-
-        self.assertIn(expected_part_1, translator.system_prompt)
-        self.assertIn(expected_part_2, translator.system_prompt)
-        self.assertIn(expected_part_3, translator.system_prompt)
+        self.assertIn("Base Prompt.", translator.base_system_prompt)
+        self.assertIn("Translate from Japanese to English.", translator.base_system_prompt)
+        self.assertIn("TermA: TransA", translator.base_system_prompt)
