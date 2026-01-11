@@ -1,0 +1,8 @@
+azure_openai:
+  api_key: "YOUR_API_KEY"
+  endpoint: "https://YOUR_RESOURCE_NAME.openai.azure.com/"
+  api_version: "2024-02-15-preview"
+  deployment_name: "gpt-4"
+
+translation:
+  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Translate from the detected language to English (if Japanese) or Japanese (if English)."
