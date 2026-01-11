@@ -1,4 +1,5 @@
 import re
+from tqdm import tqdm
 from pptx import Presentation
 from pptx.util import Pt
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -70,35 +71,38 @@ class PPTXProcessor:
         batch_size = self.translator.config.batch_size
         total_tasks = len(self.tasks)
 
-        for i in range(0, total_tasks, batch_size):
-            batch = self.tasks[i:i + batch_size]
+        with tqdm(total=total_tasks, desc="Translating Tasks", unit="task") as pbar:
+            for i in range(0, total_tasks, batch_size):
+                batch = self.tasks[i:i + batch_size]
 
-            # Prepare batch for translator
-            # Format: [{"id": 0, "text": "...", "max_chars": ...}, ...]
-            batch_input = []
-            for idx, task in enumerate(batch):
-                batch_input.append({
-                    "id": idx, # ID relative to the batch
-                    "text": task["tagged_text"],
-                    "max_chars": task["max_chars"]
-                })
-
-            # Translate batch
-            # returns list of {"id": ..., "text": "..."}
-            results = self.translator.translate_batch(batch_input)
-
-            # Map results back to tasks
-            if results:
-                # Create a map for quick lookup
-                # Ensure ID matches
-                results_map = {item.get("id"): item.get("text") for item in results}
-
+                # Prepare batch for translator
+                # Format: [{"id": 0, "text": "...", "max_chars": ...}, ...]
+                batch_input = []
                 for idx, task in enumerate(batch):
-                    translated_text = results_map.get(idx)
-                    if translated_text:
-                        # Parse and reconstruct
-                        parsed_segments = self._parse_tagged_text(translated_text)
-                        self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"])
+                    batch_input.append({
+                        "id": idx, # ID relative to the batch
+                        "text": task["tagged_text"],
+                        "max_chars": task["max_chars"]
+                    })
+
+                # Translate batch
+                # returns list of {"id": ..., "text": "..."}
+                results = self.translator.translate_batch(batch_input)
+
+                # Map results back to tasks
+                if results:
+                    # Create a map for quick lookup
+                    # Ensure ID matches
+                    results_map = {item.get("id"): item.get("text") for item in results}
+
+                    for idx, task in enumerate(batch):
+                        translated_text = results_map.get(idx)
+                        if translated_text:
+                            # Parse and reconstruct
+                            parsed_segments = self._parse_tagged_text(translated_text)
+                            self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"])
+
+                pbar.update(len(batch))
 
     def save(self, output_path):
         self.prs.save(output_path)

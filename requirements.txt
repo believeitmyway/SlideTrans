@@ -3,3 +3,4 @@ openai
 pyyaml
 azure-identity
 pytest
+tqdm
