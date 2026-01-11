@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from src.config import Config
-from src.translator import Translator
+from src.translator import Translator, MockTranslator
 from src.pptx_processor import PPTXProcessor
 
 def load_glossary(glossary_path):
@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description="Translate PowerPoint files using Azure OpenAI.")
     parser.add_argument("input_file", help="Path to the input .pptx file")
     parser.add_argument("--config", default="config.yaml", help="Path to configuration file")
+    parser.add_argument("--mock", action="store_true", help="Use mock translator without API calls")
 
     args = parser.parse_args()
 
@@ -38,7 +39,11 @@ def main():
         glossary = load_glossary(config.glossary_path)
 
         print("Initializing translator...")
-        translator = Translator(config, glossary)
+        if args.mock:
+            print("Using Mock Translator.")
+            translator = MockTranslator(config, glossary)
+        else:
+            translator = Translator(config, glossary)
 
         print(f"Processing '{args.input_file}'...")
         processor = PPTXProcessor(args.input_file, translator)
