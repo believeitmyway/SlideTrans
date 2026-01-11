@@ -1,0 +1,5 @@
+python-pptx
+openai
+pyyaml
+azure-identity
+pytest
