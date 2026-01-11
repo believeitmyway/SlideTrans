@@ -9,4 +9,4 @@ translation:
   target_language: "English"
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
-  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Keep the translation as concise as possible to ensure it fits within the original layout context. Do not increase the character count if possible."
+  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs."
