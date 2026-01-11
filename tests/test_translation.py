@@ -12,6 +12,8 @@ class TestPPTXProcessor(unittest.TestCase):
         self.mock_config = MagicMock(spec=Config)
         self.mock_config.azure_openai = {}
         self.mock_config.translation_prompt = "Mock Prompt"
+        self.mock_config.source_language = "Japanese"
+        self.mock_config.target_language = "English"
 
         # Create a mock translator
         self.mock_translator = MagicMock(spec=Translator)
@@ -141,3 +143,24 @@ class TestPPTXProcessor(unittest.TestCase):
         # Expected Size = 10.0 * (2/5) = 4.0
 
         mock_pt.assert_called_with(4.0)
+
+class TestTranslator(unittest.TestCase):
+    @patch("src.translator.AzureOpenAI")
+    def test_prompt_construction(self, mock_azure):
+        config = MagicMock(spec=Config)
+        config.azure_openai = {"api_key": "dummy", "endpoint": "dummy", "api_version": "dummy"}
+        config.translation_prompt = "Base Prompt."
+        config.source_language = "Japanese"
+        config.target_language = "English"
+
+        glossary = {"TermA": "TransA", "TermB": "TransB"}
+
+        translator = Translator(config, glossary)
+
+        expected_part_1 = "Base Prompt."
+        expected_part_2 = "Translate from Japanese to English."
+        expected_part_3 = "TermA: TransA"
+
+        self.assertIn(expected_part_1, translator.system_prompt)
+        self.assertIn(expected_part_2, translator.system_prompt)
+        self.assertIn(expected_part_3, translator.system_prompt)
