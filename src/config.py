@@ -31,3 +31,7 @@ class Config:
     @property
     def glossary_path(self):
         return self._config.get("translation", {}).get("glossary_path", "glossary.json")
+
+    @property
+    def expansion_ratio(self):
+        return self._config.get("translation", {}).get("expansion_ratio", 1.0)

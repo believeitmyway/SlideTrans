@@ -31,21 +31,39 @@ class Translator:
 
         return base_prompt + lang_instruction + glossary_instruction
 
-    def translate_text(self, text: str) -> str:
+    def translate_text(self, text: str, max_chars: int = None) -> str:
         """
         Translates the given text using Azure OpenAI.
         The text is expected to be formatted with XML-like tags.
+        max_chars: Optional integer limit for the translated text length (excluding tags).
         """
         if not text or text.strip() == "":
             return text
 
+        system_prompt = self.system_prompt
+        if max_chars is not None:
+            # Append specific constraint to system prompt for this call?
+            # Or append to user prompt? Appending to system prompt here for simplicity of logic
+            # (though normally system prompt is static, but we can reconstruct it or append).
+            # Let's append to the user message or system message for this turn.
+
+            # Instruction: "Keep translation under {max_chars} characters (excluding tags). Never remove tags."
+            # We add this to the messages list directly.
+            pass
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}
+        ]
+
+        if max_chars is not None:
+            # We insert the instruction as a system instruction override or appended to user.
+            messages.append({"role": "system", "content": f"IMPORTANT: Keep the total character count of the translated content (excluding tags) under {max_chars} characters. Do not remove or alter the tags <rN>."})
+
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": text}
-                ],
+                messages=messages,
                 temperature=0
             )
             return response.choices[0].message.content
@@ -60,7 +78,7 @@ class MockTranslator:
     def __init__(self, config: Config, glossary: dict = None):
         self.config = config
 
-    def translate_text(self, text: str) -> str:
+    def translate_text(self, text: str, max_chars: int = None) -> str:
         """
         Simulates translation by appending [EN] to content inside tags.
         Input: <r0>こんにちは</r0>

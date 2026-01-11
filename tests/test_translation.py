@@ -17,6 +17,7 @@ class TestPPTXProcessor(unittest.TestCase):
 
         # Create a mock translator
         self.mock_translator = MagicMock(spec=Translator)
+        self.mock_translator.config = self.mock_config # Attach config to translator mock
 
         # Patch Presentation to avoid loading file
         with patch("src.pptx_processor.Presentation") as MockPresentation:
@@ -74,7 +75,11 @@ class TestPPTXProcessor(unittest.TestCase):
         # Verify
         # 1. Verify Translator was called with correct tagged input
         # Input should be: <r0>Hello </r0><r1>World</r1>
-        self.mock_translator.translate_text.assert_called_with("<r0>Hello </r0><r1>World</r1>")
+        # And max_chars should be passed (Length 11 * 1.7 ~ 18, depends on exact int calculation)
+        self.mock_translator.translate_text.assert_called()
+        args, kwargs = self.mock_translator.translate_text.call_args
+        self.assertEqual(args[0], "<r0>Hello </r0><r1>World</r1>")
+        self.assertIn("max_chars", kwargs)
 
         # 2. Verify Paragraph was cleared
         mock_paragraph.clear.assert_called_once()
@@ -143,6 +148,28 @@ class TestPPTXProcessor(unittest.TestCase):
         # Expected Size = 10.0 * (2/5) = 4.0
 
         mock_pt.assert_called_with(4.0)
+
+    def test_calculate_max_chars(self):
+        # Case 1: Japanese to English (Ratio 1.7)
+        self.mock_config.source_language = "Japanese"
+        self.mock_config.target_language = "English"
+        self.mock_config.expansion_ratio = 1.7
+        # Access via property since processor doesn't store config directly but translator does
+        self.mock_translator.config = self.mock_config
+
+        # 10 chars -> 17 chars
+        self.assertEqual(self.processor._calculate_max_chars(10), 17)
+
+        # Case 2: English to Japanese (Ratio 1/1.7 = 0.588)
+        self.mock_config.source_language = "English"
+        self.mock_config.target_language = "Japanese"
+        # 100 chars -> 58 chars
+        self.assertEqual(self.processor._calculate_max_chars(100), int(100 * (1/1.7)))
+
+        # Case 3: Other (Ratio 1.0)
+        self.mock_config.source_language = "Spanish"
+        self.mock_config.target_language = "French"
+        self.assertEqual(self.processor._calculate_max_chars(100), 100)
 
 class TestTranslator(unittest.TestCase):
     @patch("src.translator.AzureOpenAI")
