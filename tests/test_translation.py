@@ -125,6 +125,6 @@ class TestTranslator(unittest.TestCase):
 
         translator = Translator(config, glossary)
 
-        self.assertIn("Base Prompt.", translator.system_prompt)
-        self.assertIn("Translate from Japanese to English.", translator.system_prompt)
-        self.assertIn("TermA: TransA", translator.system_prompt)
+        self.assertIn("Base Prompt.", translator.base_system_prompt)
+        self.assertIn("Translate from Japanese to English.", translator.base_system_prompt)
+        self.assertIn("TermA: TransA", translator.base_system_prompt)

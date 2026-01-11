@@ -16,9 +16,10 @@ class Translator:
             azure_endpoint=azure_conf.get("endpoint")
         )
         self.deployment_name = azure_conf.get("deployment_name")
-        self.system_prompt = self._build_system_prompt()
+        self.base_system_prompt = self._build_base_system_prompt()
 
-    def _build_system_prompt(self):
+    def _build_base_system_prompt(self):
+        # We don't construct the FULL prompt here anymore because we need to inject max_chars per request
         base_prompt = self.config.translation_prompt
         lang_instruction = f" Translate from {self.config.source_language} to {self.config.target_language}."
 
@@ -39,13 +40,29 @@ class Translator:
         if not text or text.strip() == "":
             return text
 
+        # Inject max_chars into the prompt
+        if max_chars is not None:
+            # Replace placeholder with actual number
+            system_prompt = self.base_system_prompt.replace("{max_chars}", str(max_chars))
+        else:
+            # Remove the constraint sentence or replace with generic text
+            # Assuming the prompt has "Keep the translation under {max_chars} characters..."
+            # We can replace with "Keep the translation length reasonable." or just remove the specific number.
+            # Simpler: replace with a very large number or just "unlimited" if the prompt flows well,
+            # but better to replace the whole sentence?
+            # Since the user specifically put the placeholder, we replace it.
+            # If we just put "unlimited", the sentence "Keep the translation under unlimited characters" is weird.
+            # Let's assume max_chars is usually provided. If not, we replace with "10000" or similar?
+            # Or we can strip the sentence containing {max_chars}.
+            # For now, let's replace with "appropriate" to keep it grammatical-ish if the prompt allows,
+            # or simply "a reasonable number of".
+            # Or better: "Keep the translation under 5000 characters" (a safe default).
+            system_prompt = self.base_system_prompt.replace("{max_chars}", "5000")
+
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
         ]
-
-        if max_chars is not None:
-            messages.append({"role": "system", "content": f"IMPORTANT: Keep the total character count of the translated content (excluding tags) under {max_chars} characters. Do not remove or alter the tags <rN>."})
 
         try:
             response = self.client.chat.completions.create(
@@ -78,7 +95,11 @@ class Translator:
 
         user_content = json.dumps(prompt_items, ensure_ascii=False)
 
-        system_prompt = self.system_prompt + "\n\nProcess the following JSON list. Return a JSON list of objects with 'id' and 'text' (translated content). Maintain the same IDs."
+        # Inject instruction for batching
+        # We replace {max_chars} with a reference to the JSON field
+        system_prompt = self.base_system_prompt.replace("{max_chars}", "the limit specified in the 'max_chars' field")
+
+        system_prompt += "\n\nProcess the following JSON list. Return a JSON list of objects with 'id' and 'text' (translated content). Maintain the same IDs."
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -94,21 +115,15 @@ class Translator:
             )
             content = response.choices[0].message.content
 
-            # The API might return a raw list or a wrapped object depending on how it interpreted "json_object".
-            # Usually for "json_object" mode we need to instruct it to output JSON in the prompt (which we did).
-            # But "json_object" enforces valid JSON.
-            # We expect: {"translations": [...]} or just [...]
-            # Let's try to parse
             try:
                 parsed = json.loads(content)
                 if isinstance(parsed, list):
                     return parsed
                 elif isinstance(parsed, dict):
-                    # Look for a list value
                     for val in parsed.values():
                         if isinstance(val, list):
                             return val
-                    return [] # Fallback
+                    return []
                 else:
                     return []
             except json.JSONDecodeError:
@@ -119,9 +134,6 @@ class Translator:
             error_str = str(e)
             print(f"Error during batch translation: {error_str}")
 
-            # Handle Token Limit Exceeded
-            # Azure OpenAI often returns "context_length_exceeded" in the error message or code.
-            # We check for generic indication of length issues.
             if "context_length_exceeded" in error_str or "maximum context length" in error_str:
                 if len(items) > 1:
                     print("Context length exceeded. Splitting batch...")
@@ -130,7 +142,6 @@ class Translator:
                     right = items[mid:]
                     return self.translate_batch(left) + self.translate_batch(right)
                 else:
-                    # Can't split further, just fail this item
                     print(f"Item too large to translate: {items[0]['id']}")
                     return []
 
@@ -143,8 +154,6 @@ class MockTranslator:
     def translate_text(self, text: str, max_chars: int = None) -> str:
         """
         Simulates translation by appending [EN] to content inside tags.
-        Input: <r0>こんにちは</r0>
-        Output: <r0>[EN] こんにちは</r0>
         """
         import re
         pattern = re.compile(r"(<r\d+>)(.*?)(</r\d+>)", re.DOTALL)
