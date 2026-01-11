@@ -1,6 +1,7 @@
 import re
 from pptx import Presentation
 from pptx.util import Pt
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 class PPTXProcessor:
     def __init__(self, filepath, translator):
@@ -14,15 +15,33 @@ class PPTXProcessor:
         """
         for slide in self.prs.slides:
             for shape in slide.shapes:
-                if not shape.has_text_frame:
-                    continue
+                self._process_shape(shape)
 
-                text_frame = shape.text_frame
-                for paragraph in text_frame.paragraphs:
-                    if not paragraph.text.strip():
+    def _process_shape(self, shape):
+        # Handle Groups (Recursive)
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            for item in shape.shapes:
+                self._process_shape(item)
+            return
+
+        # Handle Tables
+        if shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    if not cell.text_frame:
                         continue
+                    self._process_text_frame(cell.text_frame)
+            return
 
-                    self._process_paragraph(paragraph)
+        # Handle Text Frames
+        if shape.has_text_frame:
+            self._process_text_frame(shape.text_frame)
+
+    def _process_text_frame(self, text_frame):
+        for paragraph in text_frame.paragraphs:
+            if not paragraph.text.strip():
+                continue
+            self._process_paragraph(paragraph)
 
     def save(self, output_path):
         self.prs.save(output_path)
@@ -34,8 +53,15 @@ class PPTXProcessor:
         if not tagged_text:
             return
 
+        # Calculate char limit
+        # Pure text length
+        raw_text_length = len("".join([r.text for r in paragraph.runs]))
+        max_chars = self._calculate_max_chars(raw_text_length)
+        # Note: We pass max_chars to translate_text. The prompt construction logic needs to be updated.
+        # But wait, translate_text signature needs update.
+
         # 2. Translate
-        translated_text = self.translator.translate_text(tagged_text)
+        translated_text = self.translator.translate_text(tagged_text, max_chars=max_chars)
 
         # 3. Parse translated text
         parsed_segments = self._parse_tagged_text(translated_text)
@@ -84,6 +110,27 @@ class PPTXProcessor:
         pattern = re.compile(r"<r(\d+)>(.*?)</r\1>", re.DOTALL)
         matches = pattern.findall(text)
         return matches
+
+    def _calculate_max_chars(self, original_length):
+        # Logic:
+        # JP -> EN (Source=JP, Target=EN): Ratio (e.g. 1.7)
+        # EN -> JP (Source=EN, Target=JP): 1/Ratio (e.g. 0.58)
+        # Other: 1.0
+
+        ratio = 1.0
+        conf = self.translator.config # Access config via translator
+
+        s_lang = conf.source_language.lower()
+        t_lang = conf.target_language.lower()
+
+        base_ratio = conf.expansion_ratio
+
+        if "japanese" in s_lang and "english" in t_lang:
+            ratio = base_ratio
+        elif "english" in s_lang and "japanese" in t_lang:
+            ratio = 1.0 / base_ratio if base_ratio != 0 else 1.0
+
+        return int(original_length * ratio)
 
     def _reconstruct_paragraph(self, paragraph, parsed_segments, run_map):
         if not parsed_segments:
