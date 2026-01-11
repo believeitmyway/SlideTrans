@@ -55,3 +55,24 @@ class Translator:
             print(f"Error during translation: {e}")
             # If translation fails, return original text to avoid data loss
             return text
+
+class MockTranslator:
+    def __init__(self, config: Config, glossary: dict = None):
+        self.config = config
+
+    def translate_text(self, text: str) -> str:
+        """
+        Simulates translation by appending [EN] to content inside tags.
+        Input: <r0>こんにちは</r0>
+        Output: <r0>[EN] こんにちは</r0>
+        """
+        import re
+
+        # Regex to find <rN>content</rN>
+        pattern = re.compile(r"(<r\d+>)(.*?)(</r\d+>)", re.DOTALL)
+
+        def replace_match(match):
+            tag_open, content, tag_close = match.groups()
+            return f"{tag_open}[EN] {content}{tag_close}"
+
+        return pattern.sub(replace_match, text)
