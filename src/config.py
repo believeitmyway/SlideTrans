@@ -19,3 +19,15 @@ class Config:
     @property
     def translation_prompt(self):
         return self._config.get("translation", {}).get("prompt", "")
+
+    @property
+    def source_language(self):
+        return self._config.get("translation", {}).get("source_language", "Japanese")
+
+    @property
+    def target_language(self):
+        return self._config.get("translation", {}).get("target_language", "English")
+
+    @property
+    def glossary_path(self):
+        return self._config.get("translation", {}).get("glossary_path", "glossary.json")

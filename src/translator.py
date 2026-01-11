@@ -3,8 +3,9 @@ from openai import AzureOpenAI
 from src.config import Config
 
 class Translator:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, glossary: dict = None):
         self.config = config
+        self.glossary = glossary or {}
         azure_conf = self.config.azure_openai
 
         # Initialize Azure OpenAI Client
@@ -16,7 +17,19 @@ class Translator:
             azure_endpoint=azure_conf.get("endpoint")
         )
         self.deployment_name = azure_conf.get("deployment_name")
-        self.prompt = self.config.translation_prompt
+        self.system_prompt = self._build_system_prompt()
+
+    def _build_system_prompt(self):
+        base_prompt = self.config.translation_prompt
+        lang_instruction = f" Translate from {self.config.source_language} to {self.config.target_language}."
+
+        glossary_instruction = ""
+        if self.glossary:
+            glossary_instruction = "\n\nUse the following glossary for translation:\n"
+            for term, translation in self.glossary.items():
+                glossary_instruction += f"- {term}: {translation}\n"
+
+        return base_prompt + lang_instruction + glossary_instruction
 
     def translate_text(self, text: str) -> str:
         """
@@ -30,7 +43,7 @@ class Translator:
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
-                    {"role": "system", "content": self.prompt},
+                    {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": text}
                 ],
                 temperature=0

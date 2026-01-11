@@ -5,4 +5,7 @@ azure_openai:
   deployment_name: "gpt-4"
 
 translation:
-  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Translate from the detected language to English (if Japanese) or Japanese (if English). Keep the translation as concise as possible to ensure it fits within the original layout context. Do not increase the character count if possible."
+  source_language: "Japanese"
+  target_language: "English"
+  glossary_path: "glossary.json"
+  prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...</rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Keep the translation as concise as possible to ensure it fits within the original layout context. Do not increase the character count if possible."
