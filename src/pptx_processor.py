@@ -8,20 +8,27 @@ class PPTXProcessor:
         self.filepath = filepath
         self.translator = translator
         self.prs = Presentation(filepath)
+        self.tasks = []
 
     def process(self):
         """
-        Iterates through all slides and shapes, translating text.
+        Iterates through all slides and shapes, collecting text tasks,
+        then processes them in batches.
         """
+        self.tasks = []
+        # Step 1: Collect all paragraphs that need translation
         for slide in self.prs.slides:
             for shape in slide.shapes:
-                self._process_shape(shape)
+                self._collect_tasks(shape)
 
-    def _process_shape(self, shape):
+        # Step 2: Process collected tasks in batches
+        self._process_batches()
+
+    def _collect_tasks(self, shape):
         # Handle Groups (Recursive)
         if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
             for item in shape.shapes:
-                self._process_shape(item)
+                self._collect_tasks(item)
             return
 
         # Handle Tables
@@ -30,44 +37,74 @@ class PPTXProcessor:
                 for cell in row.cells:
                     if not cell.text_frame:
                         continue
-                    self._process_text_frame(cell.text_frame)
+                    self._collect_text_frame_tasks(cell.text_frame)
             return
 
         # Handle Text Frames
         if shape.has_text_frame:
-            self._process_text_frame(shape.text_frame)
+            self._collect_text_frame_tasks(shape.text_frame)
 
-    def _process_text_frame(self, text_frame):
+    def _collect_text_frame_tasks(self, text_frame):
         for paragraph in text_frame.paragraphs:
             if not paragraph.text.strip():
                 continue
-            self._process_paragraph(paragraph)
+
+            # Extract tagged text and calculate max chars immediately
+            tagged_text, run_map = self._extract_tagged_text(paragraph)
+            if not tagged_text:
+                continue
+
+            raw_text_length = len("".join([r.text for r in paragraph.runs]))
+            max_chars = self._calculate_max_chars(raw_text_length)
+
+            task = {
+                "paragraph": paragraph,
+                "tagged_text": tagged_text,
+                "run_map": run_map,
+                "max_chars": max_chars,
+                "original_text": "".join([r.text for r in paragraph.runs])
+            }
+            self.tasks.append(task)
+
+    def _process_batches(self):
+        batch_size = self.translator.config.batch_size
+        total_tasks = len(self.tasks)
+
+        for i in range(0, total_tasks, batch_size):
+            batch = self.tasks[i:i + batch_size]
+
+            # Prepare batch for translator
+            # Format: [{"id": 0, "text": "...", "max_chars": ...}, ...]
+            batch_input = []
+            for idx, task in enumerate(batch):
+                batch_input.append({
+                    "id": idx, # ID relative to the batch
+                    "text": task["tagged_text"],
+                    "max_chars": task["max_chars"]
+                })
+
+            # Translate batch
+            # returns list of {"id": ..., "text": "..."}
+            results = self.translator.translate_batch(batch_input)
+
+            # Map results back to tasks
+            if results:
+                # Create a map for quick lookup
+                # Ensure ID matches
+                results_map = {item.get("id"): item.get("text") for item in results}
+
+                for idx, task in enumerate(batch):
+                    translated_text = results_map.get(idx)
+                    if translated_text:
+                        # Parse and reconstruct
+                        parsed_segments = self._parse_tagged_text(translated_text)
+                        self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"])
 
     def save(self, output_path):
         self.prs.save(output_path)
 
-    def _process_paragraph(self, paragraph):
-        # 1. Extract runs and build tagged text
-        tagged_text, run_map = self._extract_tagged_text(paragraph)
-
-        if not tagged_text:
-            return
-
-        # Calculate char limit
-        # Pure text length
-        raw_text_length = len("".join([r.text for r in paragraph.runs]))
-        max_chars = self._calculate_max_chars(raw_text_length)
-        # Note: We pass max_chars to translate_text. The prompt construction logic needs to be updated.
-        # But wait, translate_text signature needs update.
-
-        # 2. Translate
-        translated_text = self.translator.translate_text(tagged_text, max_chars=max_chars)
-
-        # 3. Parse translated text
-        parsed_segments = self._parse_tagged_text(translated_text)
-
-        # 4. Reconstruct paragraph
-        self._reconstruct_paragraph(paragraph, parsed_segments, run_map)
+    # Legacy method _process_paragraph is no longer used directly but _reconstruct_paragraph is.
+    # We kept _reconstruct_paragraph logic.
 
     def _extract_tagged_text(self, paragraph):
         """
@@ -79,23 +116,11 @@ class PPTXProcessor:
         tagged_parts = []
         run_map = {}
 
-        # We filter out empty runs to avoid cluttering the prompt,
-        # unless they contain meaningful whitespace, but usually empty runs are artifacts.
         current_id = 0
         for run in paragraph.runs:
-            # We preserve all runs to maintain spacing if they have text
             text = run.text
-            # Note: We don't strip text here because spaces are important.
-
             run_id = str(current_id)
             run_map[run_id] = run
-
-            # Escape XML special characters in text to avoid confusing the tag parser later?
-            # Ideally yes, but for now assuming simple text or that LLM handles it.
-            # Let's do basic escaping if needed, but < > might confuse regex.
-            # We'll use a unique tag delimiter that is unlikely to be in text if we were rigorous,
-            # but <rN> is requested.
-
             tagged_parts.append(f"<r{run_id}>{text}</r{run_id}>")
             current_id += 1
 
@@ -105,20 +130,13 @@ class PPTXProcessor:
         """
         Parses string like <r0>Hola</r0> <r1>Mundo</r1> into a list of (run_id, content).
         """
-        # Regex to find <rN>content</rN>
-        # Non-greedy match for content
         pattern = re.compile(r"<r(\d+)>(.*?)</r\1>", re.DOTALL)
         matches = pattern.findall(text)
         return matches
 
     def _calculate_max_chars(self, original_length):
-        # Logic:
-        # JP -> EN (Source=JP, Target=EN): Ratio (e.g. 1.7)
-        # EN -> JP (Source=EN, Target=JP): 1/Ratio (e.g. 0.58)
-        # Other: 1.0
-
         ratio = 1.0
-        conf = self.translator.config # Access config via translator
+        conf = self.translator.config
 
         s_lang = conf.source_language.lower()
         t_lang = conf.target_language.lower()
@@ -146,20 +164,14 @@ class PPTXProcessor:
         scaling_factor = 1.0
         if trans_width > orig_width and orig_width > 0:
             scaling_factor = orig_width / trans_width
-            # Limit scaling to not be too tiny? User said "automatically reduce",
-            # let's assume no lower bound for now, or maybe 0.5 minimum.
-            # But the user wants layout preserved, so fitting is priority.
 
         # Clear existing runs
-        # Note: p.clear() removes all runs.
         paragraph.clear()
 
         # Add new runs
         for run_id, content in parsed_segments:
             original_run = run_map.get(run_id)
             if not original_run:
-                # If AI hallucinated a new ID, we skip or use default style.
-                # Let's create a run with default style (inherit from paragraph)
                 new_run = paragraph.add_run()
             else:
                 new_run = paragraph.add_run()
@@ -175,8 +187,6 @@ class PPTXProcessor:
         """
         width = 0
         for char in text:
-            # Simple check: if ord(char) > 255, assume wide.
-            # This is a rough heuristic.
             if ord(char) > 255:
                 width += 2
             else:
@@ -205,5 +215,4 @@ class PPTXProcessor:
                     target.font.color.theme_color = source.font.color.theme_color
                     target.font.color.brightness = source.font.color.brightness
         except Exception:
-            # Color copying can be tricky if properties are not set
             pass
