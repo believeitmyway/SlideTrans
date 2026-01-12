@@ -236,6 +236,30 @@ class PPTXProcessor:
         target.font.bold = source.font.bold
         target.font.italic = source.font.italic
 
+        # Underline
+        try:
+            target.font.underline = source.font.underline
+        except Exception:
+            pass
+
+        # Strikethrough (strike)
+        try:
+            # python-pptx uses .strike for strikethrough in some versions, or it might be in .font.strike
+            # source.font.strike property usually exists.
+            if hasattr(source.font, 'strike'):
+                target.font.strike = source.font.strike
+        except Exception:
+            pass
+
+        # Superscript/Subscript (baseline)
+        # In python-pptx, this is often 'baseline' property on font, taking a percentage value.
+        # 0 is baseline, >0 superscript, <0 subscript.
+        try:
+            if hasattr(source.font, 'baseline'):
+                target.font.baseline = source.font.baseline
+        except Exception:
+            pass
+
         # Color
         try:
             if source.font.color.type:
