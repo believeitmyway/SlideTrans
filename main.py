@@ -23,6 +23,7 @@ def main():
     parser.add_argument("input_file", help="Path to the input .pptx file")
     parser.add_argument("--config", default="config.yaml", help="Path to configuration file")
     parser.add_argument("--mock", action="store_true", help="Use mock translator without API calls")
+    parser.add_argument("--debug-llm", action="store_true", help="Log LLM prompts and responses to a file")
 
     args = parser.parse_args()
 
@@ -42,9 +43,9 @@ def main():
         print("Initializing translator...")
         if args.mock:
             print("Using Mock Translator.")
-            translator = MockTranslator(config, glossary)
+            translator = MockTranslator(config, glossary, debug_mode=args.debug_llm)
         else:
-            translator = Translator(config, glossary)
+            translator = Translator(config, glossary, debug_mode=args.debug_llm)
 
         print(f"Processing '{args.input_file}'...")
         processor = PPTXProcessor(args.input_file, translator)

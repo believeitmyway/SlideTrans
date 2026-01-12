@@ -10,5 +10,6 @@ translation:
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
   batch_size: 10
+  max_batch_chars: 2000
   presentation_body_prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...<rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Preserve all original line breaks (\\n) in the translation. The text is for a presentation slide. Full sentences are not required (e.g., use 'Difficult to...' instead of 'It is difficult to...'). Keep the translation simple and concise. Keep the translation under {max_chars} characters (excluding tags)."
   constrained_text_prompt: "You are a professional translator. Translate the text within the XML-like tags <rN>...<rN>. Preserve the tags exactly as they are. Only translate the content inside the tags. Do not change the tag IDs. Preserve all original line breaks (\\n) in the translation. This text is inside a table or grouped shape with strict layout constraints. Priority #1 is to fit the text within the original character count to prevent line breaks. You must summarize drastically or omit details if necessary to meet the {max_chars} character limit (excluding tags). Never exceed the limit. You MUST translate the content. Do not return the source text."
