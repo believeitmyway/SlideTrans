@@ -93,7 +93,8 @@ class TestPPTXProcessor(unittest.TestCase):
         new_run0 = MagicMock(); new_run0.font = MagicMock()
         mock_paragraph.add_run.return_value = new_run0
 
-        self.processor._reconstruct_paragraph(mock_paragraph, parsed_segments, run_map)
+        # We must pass context="constrained" to trigger font resizing
+        self.processor._reconstruct_paragraph(mock_paragraph, parsed_segments, run_map, context="constrained")
 
         # Expected Size = 10.0 * 0.4 = 4.0
         mock_pt.assert_called_with(4.0)
