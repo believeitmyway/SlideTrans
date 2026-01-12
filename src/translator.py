@@ -1,12 +1,14 @@
 import os
 import json
+import datetime
 from openai import AzureOpenAI
 from src.config import Config
 
 class Translator:
-    def __init__(self, config: Config, glossary: dict = None):
+    def __init__(self, config: Config, glossary: dict = None, debug_mode: bool = False):
         self.config = config
         self.glossary = glossary or {}
+        self.debug_mode = debug_mode
         azure_conf = self.config.azure_openai
 
         # Initialize Azure OpenAI Client
@@ -31,6 +33,22 @@ class Translator:
 
         return base_prompt + lang_instruction + glossary_instruction
 
+    def _log_debug(self, messages, response_content):
+        if not self.debug_mode:
+            return
+
+        try:
+            with open("llm_debug.log", "a", encoding="utf-8") as f:
+                timestamp = datetime.datetime.now().isoformat()
+                f.write(f"--- [{timestamp}] REQUEST ---\n")
+                f.write(json.dumps(messages, ensure_ascii=False, indent=2))
+                f.write("\n")
+                f.write(f"--- [{timestamp}] RESPONSE ---\n")
+                f.write(str(response_content))
+                f.write("\n" + "="*80 + "\n")
+        except Exception as e:
+            print(f"Failed to write debug log: {e}")
+
     def translate_text(self, text: str, max_chars: int = None) -> str:
         """
         Translates the given text using Azure OpenAI.
@@ -45,18 +63,6 @@ class Translator:
             # Replace placeholder with actual number
             system_prompt = self.base_system_prompt.replace("{max_chars}", str(max_chars))
         else:
-            # Remove the constraint sentence or replace with generic text
-            # Assuming the prompt has "Keep the translation under {max_chars} characters..."
-            # We can replace with "Keep the translation length reasonable." or just remove the specific number.
-            # Simpler: replace with a very large number or just "unlimited" if the prompt flows well,
-            # but better to replace the whole sentence?
-            # Since the user specifically put the placeholder, we replace it.
-            # If we just put "unlimited", the sentence "Keep the translation under unlimited characters" is weird.
-            # Let's assume max_chars is usually provided. If not, we replace with "10000" or similar?
-            # Or we can strip the sentence containing {max_chars}.
-            # For now, let's replace with "appropriate" to keep it grammatical-ish if the prompt allows,
-            # or simply "a reasonable number of".
-            # Or better: "Keep the translation under 5000 characters" (a safe default).
             system_prompt = self.base_system_prompt.replace("{max_chars}", "5000")
 
         messages = [
@@ -70,7 +76,11 @@ class Translator:
                 messages=messages,
                 temperature=0
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+
+            self._log_debug(messages, content)
+
+            return content
         except Exception as e:
             print(f"Error during translation: {e}")
             return text
@@ -98,22 +108,6 @@ class Translator:
 
         # Determine base prompt to use
         base_prompt_to_use = system_prompt_template if system_prompt_template else self.base_system_prompt
-
-        # If the template wasn't constructed by _build_base_system_prompt (e.g. raw from config),
-        # it might miss the language/glossary instructions.
-        # But _build_base_system_prompt adds them.
-        # Let's assume the caller passes a FULL template or we need to rebuild it?
-        # A simpler way is to pass the raw config string key to this method?
-        # No, better to have a helper to build prompt from a raw string.
-        # BUT for now, let's assume the caller constructs it or we update _build_system_prompt logic.
-
-        # REFACTOR: The caller (PPTXProcessor) has access to Config.
-        # The Translator should expose a method `build_prompt(raw_text)` or similar.
-        # OR simpler: The caller passes the "role" of the text and we select the prompt?
-        # Let's stick to passing the TEMPLATE string from config, but we need to append Lang/Glossary.
-
-        # Correction: self.base_system_prompt ALREADY includes lang/glossary.
-        # If we switch the "base_prompt" part, we need to re-append lang/glossary.
 
         # Helper logic inline:
         if system_prompt_template:
@@ -150,6 +144,8 @@ class Translator:
             )
             content = response.choices[0].message.content
 
+            self._log_debug(messages, content)
+
             try:
                 parsed = json.loads(content)
                 if isinstance(parsed, list):
@@ -183,8 +179,25 @@ class Translator:
             return []
 
 class MockTranslator:
-    def __init__(self, config: Config, glossary: dict = None):
+    def __init__(self, config: Config, glossary: dict = None, debug_mode: bool = False):
         self.config = config
+        self.debug_mode = debug_mode
+
+    def _log_debug(self, messages, response_content):
+        if not self.debug_mode:
+            return
+
+        try:
+            with open("llm_debug.log", "a", encoding="utf-8") as f:
+                timestamp = datetime.datetime.now().isoformat()
+                f.write(f"--- [{timestamp}] REQUEST (MOCK) ---\n")
+                f.write(json.dumps(messages, ensure_ascii=False, indent=2))
+                f.write("\n")
+                f.write(f"--- [{timestamp}] RESPONSE (MOCK) ---\n")
+                f.write(str(response_content))
+                f.write("\n" + "="*80 + "\n")
+        except Exception as e:
+            print(f"Failed to write debug log: {e}")
 
     def translate_text(self, text: str, max_chars: int = None) -> str:
         """
@@ -195,17 +208,35 @@ class MockTranslator:
         def replace_match(match):
             tag_open, content, tag_close = match.groups()
             return f"{tag_open}[EN] {content}{tag_close}"
-        return pattern.sub(replace_match, text)
+
+        result = pattern.sub(replace_match, text)
+
+        # Log simulated activity
+        messages = [{"role": "user", "content": text}]
+        self._log_debug(messages, result)
+
+        return result
 
     def translate_batch(self, items: list, system_prompt_template: str = None) -> list:
         """
         Simulates batch translation.
         """
         results = []
+        user_content_sim = json.dumps(items) # Simplified log payload
+
         for item in items:
             translated_text = self.translate_text(item["text"])
             results.append({
                 "id": item["id"],
                 "text": translated_text
             })
+
+        # translate_text logs individually, but batch logic usually logs the batch request.
+        # To avoid double logging or missing the batch structure, let's log the batch level here
+        # and suppress individual logs? Or just log both.
+        # Since Mock is just for testing, let's just log the batch structure to verify the format.
+
+        messages = [{"role": "system", "content": "Mock Batch"}, {"role": "user", "content": user_content_sim}]
+        self._log_debug(messages, json.dumps(results))
+
         return results
