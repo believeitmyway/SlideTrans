@@ -48,3 +48,7 @@ class Config:
     @property
     def batch_size(self):
         return self._config.get("translation", {}).get("batch_size", 10)
+
+    @property
+    def max_batch_chars(self):
+        return self._config.get("translation", {}).get("max_batch_chars", 2000)

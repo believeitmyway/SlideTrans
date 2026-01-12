@@ -84,6 +84,7 @@ class PPTXProcessor:
 
     def _process_batches(self, tasks, prompt_config_key, desc, context="standard"):
         batch_size = self.translator.config.batch_size
+        max_batch_chars = self.translator.config.max_batch_chars
         total_tasks = len(tasks)
 
         # Determine prompt template
@@ -94,34 +95,59 @@ class PPTXProcessor:
         else:
             prompt_template = None
 
-        with tqdm(total=total_tasks, desc=desc, unit="task") as pbar:
-            for i in range(0, total_tasks, batch_size):
-                batch = tasks[i:i + batch_size]
+        current_batch = []
+        current_char_count = 0
 
-                # Prepare batch for translator
-                batch_input = []
+        # We need a custom progress bar manual update because we process in variable chunks
+        pbar = tqdm(total=total_tasks, desc=desc, unit="task")
+
+        def process_current_batch(batch):
+            if not batch:
+                return
+
+            # Prepare batch for translator
+            batch_input = []
+            for idx, task in enumerate(batch):
+                batch_input.append({
+                    "id": idx, # ID relative to the batch
+                    "text": task["tagged_text"],
+                    "max_chars": task["max_chars"]
+                })
+
+            # Translate batch
+            results = self.translator.translate_batch(batch_input, system_prompt_template=prompt_template)
+
+            # Map results back to tasks
+            if results:
+                results_map = {item.get("id"): item.get("text") for item in results}
+
                 for idx, task in enumerate(batch):
-                    batch_input.append({
-                        "id": idx, # ID relative to the batch
-                        "text": task["tagged_text"],
-                        "max_chars": task["max_chars"]
-                    })
+                    translated_text = results_map.get(idx)
+                    if translated_text:
+                        # Parse and reconstruct
+                        parsed_segments = self._parse_tagged_text(translated_text)
+                        self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"], context=context)
 
-                # Translate batch
-                results = self.translator.translate_batch(batch_input, system_prompt_template=prompt_template)
+            pbar.update(len(batch))
 
-                # Map results back to tasks
-                if results:
-                    results_map = {item.get("id"): item.get("text") for item in results}
+        for task in tasks:
+            task_chars = len(task["tagged_text"])
 
-                    for idx, task in enumerate(batch):
-                        translated_text = results_map.get(idx)
-                        if translated_text:
-                            # Parse and reconstruct
-                            parsed_segments = self._parse_tagged_text(translated_text)
-                            self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"], context=context)
+            # Check if adding this task exceeds limits
+            if len(current_batch) >= batch_size or (current_char_count + task_chars > max_batch_chars and len(current_batch) > 0):
+                # Process current batch
+                process_current_batch(current_batch)
+                current_batch = []
+                current_char_count = 0
 
-                pbar.update(len(batch))
+            current_batch.append(task)
+            current_char_count += task_chars
+
+        # Process remaining
+        if current_batch:
+            process_current_batch(current_batch)
+
+        pbar.close()
 
     def save(self, output_path):
         self.prs.save(output_path)
