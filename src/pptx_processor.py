@@ -28,11 +28,11 @@ class PPTXProcessor:
         # Step 2: Process collected tasks in batches
         # Process Standard Tasks
         if self.standard_tasks:
-            self._process_batches(self.standard_tasks, "presentation_body_prompt", "Translating Standard Text")
+            self._process_batches(self.standard_tasks, "presentation_body_prompt", "Translating Standard Text", context="standard")
 
         # Process Constrained Tasks (Tables/Groups)
         if self.constrained_tasks:
-            self._process_batches(self.constrained_tasks, "constrained_text_prompt", "Translating Constrained Text")
+            self._process_batches(self.constrained_tasks, "constrained_text_prompt", "Translating Constrained Text", context="constrained")
 
     def _collect_tasks(self, shape, context="standard"):
         # Handle Groups (Recursive)
@@ -82,7 +82,7 @@ class PPTXProcessor:
             else:
                 self.standard_tasks.append(task)
 
-    def _process_batches(self, tasks, prompt_config_key, desc):
+    def _process_batches(self, tasks, prompt_config_key, desc, context="standard"):
         batch_size = self.translator.config.batch_size
         total_tasks = len(tasks)
 
@@ -119,7 +119,7 @@ class PPTXProcessor:
                         if translated_text:
                             # Parse and reconstruct
                             parsed_segments = self._parse_tagged_text(translated_text)
-                            self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"])
+                            self._reconstruct_paragraph(task["paragraph"], parsed_segments, task["run_map"], context=context)
 
                 pbar.update(len(batch))
 
@@ -173,20 +173,27 @@ class PPTXProcessor:
 
         return int(original_length * ratio)
 
-    def _reconstruct_paragraph(self, paragraph, parsed_segments, run_map):
+    def _reconstruct_paragraph(self, paragraph, parsed_segments, run_map, context="standard"):
         if not parsed_segments:
             return
 
-        # Calculate width scaling factor
-        original_text = "".join([r.text for r in paragraph.runs])
-        translated_text = "".join([content for _, content in parsed_segments])
-
-        orig_width = self._estimate_width(original_text)
-        trans_width = self._estimate_width(translated_text)
-
         scaling_factor = 1.0
-        if trans_width > orig_width and orig_width > 0:
-            scaling_factor = orig_width / trans_width
+
+        if context == "constrained":
+            # Calculate width scaling factor only for constrained context
+            original_text = "".join([r.text for r in paragraph.runs])
+            translated_text = "".join([content for _, content in parsed_segments])
+
+            orig_width = self._estimate_width(original_text)
+            trans_width = self._estimate_width(translated_text)
+
+            if trans_width > orig_width and orig_width > 0:
+                scaling_factor = orig_width / trans_width
+
+        # If standard, we intentionally skip scaling (scaling_factor stays 1.0)
+        # to allow text to overflow, which LayoutAdjuster will handle.
+
+        # Clear existing runs
 
         # Clear existing runs
         paragraph.clear()
