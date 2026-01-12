@@ -1,5 +1,5 @@
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_AUTO_SHAPE_TYPE
 from pptx.util import Pt
 from tqdm import tqdm
 import math
@@ -38,36 +38,40 @@ class LayoutAdjuster:
         if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
             return
 
+        # Restrict widening to pure Text Boxes only
+        allow_widening = (shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX)
+
         try:
-            current_left = shape.left
-            current_top = shape.top
-            current_width = shape.width
-            current_height = shape.height
-            current_right = current_left + current_width
+            if allow_widening:
+                current_left = shape.left
+                current_top = shape.top
+                current_width = shape.width
+                current_height = shape.height
+                current_right = current_left + current_width
 
-            # Find nearest obstruction to the right
-            slide_width = self.prs.slide_width
-            max_right = slide_width
+                # Find nearest obstruction to the right
+                slide_width = self.prs.slide_width
+                max_right = slide_width
 
-            # Check other shapes
-            for other in all_shapes:
-                if other == shape:
-                    continue
+                # Check other shapes
+                for other in all_shapes:
+                    if other == shape:
+                        continue
 
-                # Simple AABB collision check for "in the same horizontal band"
-                if other.left >= current_right:
-                    if not (other.top + other.height < current_top or other.top > current_top + current_height):
-                        if other.left < max_right:
-                            max_right = other.left
+                    # Simple AABB collision check for "in the same horizontal band"
+                    if other.left >= current_right:
+                        if not (other.top + other.height < current_top or other.top > current_top + current_height):
+                            if other.left < max_right:
+                                max_right = other.left
 
-            # Calculate new width
-            # Leave a small margin (e.g., 0.1 inch)
-            margin = 91440
-            available_width = max_right - current_left - margin
+                # Calculate new width
+                # Leave a small margin (e.g., 0.1 inch)
+                margin = 91440
+                available_width = max_right - current_left - margin
 
-            # 1. Widen the shape if possible
-            if available_width > current_width:
-                shape.width = int(available_width)
+                # 1. Widen the shape if possible
+                if available_width > current_width:
+                    shape.width = int(available_width)
 
             # Ensure word wrap is on (important for multi-line calculation)
             shape.text_frame.word_wrap = True
