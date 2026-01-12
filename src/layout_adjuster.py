@@ -82,10 +82,14 @@ class LayoutAdjuster:
 
             # Enable AutoFit "Shrink text on overflow"
             # TEXT_TO_FIT_SHAPE = 1
-            shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
-            # Also ensure word wrap is on?
+            # Ensure word wrap is on
             shape.text_frame.word_wrap = True
+
+            # Clear explicit font sizes to force AutoFit recalculation
+            self._clear_explicit_font_sizing(shape.text_frame)
+
+            shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
         except Exception as e:
             # print(f"Error adjusting shape: {e}")
@@ -100,8 +104,9 @@ class LayoutAdjuster:
         for row in shape.table.rows:
             for cell in row.cells:
                 if cell.text_frame:
-                    cell.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
                     cell.text_frame.word_wrap = True
+                    self._clear_explicit_font_sizing(cell.text_frame)
+                    cell.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
     def _adjust_group(self, group_shape):
         for shape in group_shape.shapes:
@@ -109,5 +114,15 @@ class LayoutAdjuster:
                  # Recursive adjustment?
                  # Collision detection inside groups is hard because coordinates might be relative or transformed.
                  # Safest bet: Just set AutoFit.
-                 shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
                  shape.text_frame.word_wrap = True
+                 self._clear_explicit_font_sizing(shape.text_frame)
+                 shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+    def _clear_explicit_font_sizing(self, text_frame):
+        """
+        Clears explicit font sizes from all runs in the text frame.
+        This allows PowerPoint's AutoFit engine to take over control of the font size.
+        """
+        for paragraph in text_frame.paragraphs:
+            for run in paragraph.runs:
+                run.font.size = None
