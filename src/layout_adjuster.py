@@ -2,6 +2,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Pt
 from tqdm import tqdm
+import math
 
 class LayoutAdjuster:
     def __init__(self, filepath):
@@ -72,7 +73,8 @@ class LayoutAdjuster:
             shape.text_frame.word_wrap = True
 
             # 2. Manual Font Scaling
-            self._apply_manual_fit(shape.text_frame, shape.width)
+            # We must pass the available height too, assuming shape height is fixed/max
+            self._apply_manual_fit(shape.text_frame, shape.width, shape.height)
 
         except Exception as e:
             # print(f"Error adjusting shape: {e}")
@@ -80,87 +82,134 @@ class LayoutAdjuster:
 
     def _adjust_table(self, shape):
         for row in shape.table.rows:
+            row_height = row.height
             for cell in row.cells:
                 if cell.text_frame:
                     cell.text_frame.word_wrap = True
-                    # Check against cell width
-                    self._apply_manual_fit(cell.text_frame, cell.width)
+                    # Check against cell width and row height
+                    self._apply_manual_fit(cell.text_frame, cell.width, row_height)
 
     def _adjust_group(self, group_shape):
         for shape in group_shape.shapes:
              if shape.has_text_frame:
                  shape.text_frame.word_wrap = True
-                 self._apply_manual_fit(shape.text_frame, shape.width)
+                 self._apply_manual_fit(shape.text_frame, shape.width, shape.height)
 
-    def _apply_manual_fit(self, text_frame, available_width):
+    def _apply_manual_fit(self, text_frame, available_width, available_height):
         """
-        Estimates text width and shrinks font if it exceeds available_width.
+        Estimates text height based on wrapping and shrinks font if it exceeds available_height.
         """
         if not available_width or available_width <= 0:
             return
 
-        text_width = self._estimate_text_width(text_frame)
+        # If height is not provided or zero, we assume it can grow, so we don't shrink?
+        # But user said height is fixed.
+        if not available_height or available_height <= 0:
+            available_height = 99999999 # Treat as infinite if unknown
 
-        if text_width > available_width:
-            ratio = available_width / text_width
-            # Apply a small buffer to be safe (e.g., 95%)
-            safe_ratio = ratio * 0.95
-            self._scale_font_size(text_frame, safe_ratio)
+        # Iterative shrinking? Or calculate once.
+        # Calculating exact wrap is hard.
+        # Let's do a heuristic:
+        # 1. Calculate total length of text in EMUs (if it were one line).
+        # 2. Divide by available_width to get estimated lines.
+        # 3. Multiply by line_height to get total height.
 
-    def _estimate_text_width(self, text_frame):
-        """
-        Estimates the visual width of the longest line in the text frame in EMUs.
-        """
-        max_line_width = 0
-        current_line_width = 0
+        total_text_width_linear = self._estimate_total_linear_width(text_frame)
 
-        # We need to handle paragraphs and possible soft breaks.
-        # Ideally, we iterate runs.
-        # But separate paragraphs implies new lines.
+        # Avoid division by zero
+        if total_text_width_linear == 0:
+            return
 
+        # Average Font Size estimate (weighted? or just max?)
+        # We need a representative font size to calculate line height.
+        avg_font_size_pt = self._get_max_font_size(text_frame)
+        if avg_font_size_pt == 0:
+            avg_font_size_pt = 18 # Fallback
+
+        line_height_emu = avg_font_size_pt * 12700 * 1.2 # Approx 1.2 spacing
+
+        # Estimated lines
+        # We need to account that words cannot be split easily, so effective width usage is < 100%.
+        # Let's assume 90% efficiency.
+        effective_width = available_width * 0.95
+
+        estimated_lines = math.ceil(total_text_width_linear / effective_width)
+
+        # If there are explicit paragraphs, each paragraph starts a new line.
+        # The linear width sum method underestimates if there are many short paragraphs.
+        # Better: Sum linear width per paragraph, calc lines per paragraph.
+
+        estimated_lines = 0
         for paragraph in text_frame.paragraphs:
-            # Reset line width for new paragraph
-            # But wait, what if the previous paragraph didn't end with a newline?
-            # In PPT, paragraphs are block elements. They always start on a new line.
-            if current_line_width > max_line_width:
-                max_line_width = current_line_width
-            current_line_width = 0
+            p_width = self._estimate_paragraph_linear_width(paragraph)
+            if p_width == 0:
+                # Empty paragraph = 1 line (blank line)
+                lines = 1
+            else:
+                lines = math.ceil(p_width / effective_width)
+            estimated_lines += lines
 
-            for run in paragraph.runs:
-                font_size = run.font.size
-                if font_size is None:
-                    font_size = Pt(18) # Default fallback
+        estimated_total_height = estimated_lines * line_height_emu
 
-                # Calculate width of this run
-                # Check for manual newlines in text (though normally run text doesn't contain \n unless explicitly added)
-                text = run.text
+        if estimated_total_height > available_height:
+            # We need to shrink.
+            # Height is proportional to Font Size (Line Height) * Lines.
+            # Lines is proportional to 1 / Font Size (roughly).
+            # Wait, LineWidth ~ FontSize.
+            # Lines = (TotalChars * FontSize) / BoxWidth.
+            # Height = Lines * (FontSize * 1.2)
+            # Height = (TotalChars * FontSize / BoxWidth) * (FontSize * 1.2)
+            # Height = (TotalChars * 1.2 / BoxWidth) * FontSize^2
+            # Height = K * FontSize^2
 
-                # Split by newline if present (preservation logic might put \n in runs)
-                parts = text.split('\n')
+            # Ratio needed = AvailableHeight / EstimatedHeight
+            # (NewSize / OldSize)^2 = Ratio
+            # NewSize / OldSize = sqrt(Ratio)
 
-                for i, part in enumerate(parts):
-                    if i > 0:
-                        # New line started
-                        if current_line_width > max_line_width:
-                            max_line_width = current_line_width
-                        current_line_width = 0
+            ratio = available_height / estimated_total_height
+            scale_factor = math.sqrt(ratio)
 
-                    # Calculate width of part
-                    part_width = 0
-                    for char in part:
-                        # Estimate width: Wide ~ 1.0 * Size, Narrow ~ 0.5 * Size
-                        # 1 pt = 12700 EMUs
-                        is_wide = ord(char) > 255
-                        factor = 1.0 if is_wide else 0.55 # 0.55 is a bit safer for variable width fonts
-                        char_width = font_size.pt * 12700 * factor
-                        part_width += char_width
+            # Apply safety buffer
+            safe_factor = scale_factor * 0.95
 
-                    current_line_width += part_width
+            self._scale_font_size(text_frame, safe_factor)
 
-        if current_line_width > max_line_width:
-            max_line_width = current_line_width
+    def _estimate_total_linear_width(self, text_frame):
+        total = 0
+        for p in text_frame.paragraphs:
+            total += self._estimate_paragraph_linear_width(p)
+        return total
 
-        return max_line_width
+    def _estimate_paragraph_linear_width(self, paragraph):
+        width = 0
+        for run in paragraph.runs:
+            font_size = run.font.size
+            if font_size is None:
+                font_size = Pt(18)
+
+            text = run.text
+            # Remove newlines for linear calculation?
+            # Actually explicit newlines in a run should force line breaks,
+            # but usually they are separate paragraphs.
+            # If text has \n, it acts like soft break.
+            # For simplicity, treat chars as linear flow.
+
+            for char in text:
+                if char == '\n':
+                    continue # Handle separately?
+                is_wide = ord(char) > 255
+                factor = 1.0 if is_wide else 0.55
+                char_width = font_size.pt * 12700 * factor
+                width += char_width
+        return width
+
+    def _get_max_font_size(self, text_frame):
+        max_size = 0
+        for p in text_frame.paragraphs:
+            for r in p.runs:
+                if r.font.size and r.font.size.pt > max_size:
+                    max_size = r.font.size.pt
+        return max_size
 
     def _scale_font_size(self, text_frame, ratio):
         """
@@ -170,13 +219,10 @@ class LayoutAdjuster:
             for run in paragraph.runs:
                 if run.font.size:
                     new_size = run.font.size.pt * ratio
-                    # Set minimum size limit? (e.g. 6pt)
                     if new_size < 6:
                         new_size = 6
                     run.font.size = Pt(new_size)
                 else:
-                    # If size was None (inherited), set it to scaled default
-                    # Default 18pt * ratio
                     new_size = 18 * ratio
                     if new_size < 6:
                         new_size = 6
