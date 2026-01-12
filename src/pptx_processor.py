@@ -1,4 +1,5 @@
 import re
+import html
 from tqdm import tqdm
 from pptx import Presentation
 from pptx.util import Pt
@@ -167,7 +168,7 @@ class PPTXProcessor:
 
         current_id = 0
         for run in paragraph.runs:
-            text = run.text
+            text = html.escape(run.text)
             run_id = str(current_id)
             run_map[run_id] = run
             tagged_parts.append(f"<r{run_id}>{text}</r{run_id}>")
@@ -233,7 +234,7 @@ class PPTXProcessor:
                 new_run = paragraph.add_run()
                 self._copy_run_formatting(original_run, new_run, scaling_factor)
 
-            new_run.text = content
+            new_run.text = html.unescape(content)
 
     def _estimate_width(self, text):
         """
