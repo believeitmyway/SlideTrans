@@ -9,27 +9,37 @@ class PPTXProcessor:
         self.filepath = filepath
         self.translator = translator
         self.prs = Presentation(filepath)
-        self.tasks = []
+        self.standard_tasks = []
+        self.constrained_tasks = []
 
     def process(self):
         """
         Iterates through all slides and shapes, collecting text tasks,
         then processes them in batches.
         """
-        self.tasks = []
+        self.standard_tasks = []
+        self.constrained_tasks = []
+
         # Step 1: Collect all paragraphs that need translation
         for slide in self.prs.slides:
             for shape in slide.shapes:
-                self._collect_tasks(shape)
+                self._collect_tasks(shape, context="standard")
 
         # Step 2: Process collected tasks in batches
-        self._process_batches()
+        # Process Standard Tasks
+        if self.standard_tasks:
+            self._process_batches(self.standard_tasks, "presentation_body_prompt", "Translating Standard Text")
 
-    def _collect_tasks(self, shape):
+        # Process Constrained Tasks (Tables/Groups)
+        if self.constrained_tasks:
+            self._process_batches(self.constrained_tasks, "constrained_text_prompt", "Translating Constrained Text")
+
+    def _collect_tasks(self, shape, context="standard"):
         # Handle Groups (Recursive)
         if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
             for item in shape.shapes:
-                self._collect_tasks(item)
+                # Items inside a group are constrained
+                self._collect_tasks(item, context="constrained")
             return
 
         # Handle Tables
@@ -38,14 +48,15 @@ class PPTXProcessor:
                 for cell in row.cells:
                     if not cell.text_frame:
                         continue
-                    self._collect_text_frame_tasks(cell.text_frame)
+                    # Items inside a table are constrained
+                    self._collect_text_frame_tasks(cell.text_frame, context="constrained")
             return
 
         # Handle Text Frames
         if shape.has_text_frame:
-            self._collect_text_frame_tasks(shape.text_frame)
+            self._collect_text_frame_tasks(shape.text_frame, context=context)
 
-    def _collect_text_frame_tasks(self, text_frame):
+    def _collect_text_frame_tasks(self, text_frame, context="standard"):
         for paragraph in text_frame.paragraphs:
             if not paragraph.text.strip():
                 continue
@@ -65,18 +76,29 @@ class PPTXProcessor:
                 "max_chars": max_chars,
                 "original_text": "".join([r.text for r in paragraph.runs])
             }
-            self.tasks.append(task)
 
-    def _process_batches(self):
+            if context == "constrained":
+                self.constrained_tasks.append(task)
+            else:
+                self.standard_tasks.append(task)
+
+    def _process_batches(self, tasks, prompt_config_key, desc):
         batch_size = self.translator.config.batch_size
-        total_tasks = len(self.tasks)
+        total_tasks = len(tasks)
 
-        with tqdm(total=total_tasks, desc="Translating Tasks", unit="task") as pbar:
+        # Determine prompt template
+        if prompt_config_key == "presentation_body_prompt":
+            prompt_template = self.translator.config.presentation_body_prompt
+        elif prompt_config_key == "constrained_text_prompt":
+            prompt_template = self.translator.config.constrained_text_prompt
+        else:
+            prompt_template = None
+
+        with tqdm(total=total_tasks, desc=desc, unit="task") as pbar:
             for i in range(0, total_tasks, batch_size):
-                batch = self.tasks[i:i + batch_size]
+                batch = tasks[i:i + batch_size]
 
                 # Prepare batch for translator
-                # Format: [{"id": 0, "text": "...", "max_chars": ...}, ...]
                 batch_input = []
                 for idx, task in enumerate(batch):
                     batch_input.append({
@@ -86,13 +108,10 @@ class PPTXProcessor:
                     })
 
                 # Translate batch
-                # returns list of {"id": ..., "text": "..."}
-                results = self.translator.translate_batch(batch_input)
+                results = self.translator.translate_batch(batch_input, system_prompt_template=prompt_template)
 
                 # Map results back to tasks
                 if results:
-                    # Create a map for quick lookup
-                    # Ensure ID matches
                     results_map = {item.get("id"): item.get("text") for item in results}
 
                     for idx, task in enumerate(batch):

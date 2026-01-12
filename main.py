@@ -5,6 +5,7 @@ import sys
 from src.config import Config
 from src.translator import Translator, MockTranslator
 from src.pptx_processor import PPTXProcessor
+from src.layout_adjuster import LayoutAdjuster
 
 def load_glossary(glossary_path):
     if not os.path.exists(glossary_path):
@@ -49,10 +50,22 @@ def main():
         processor = PPTXProcessor(args.input_file, translator)
         processor.process()
 
-        # Save output
+        # Intermediate save (optional, but good for safety)
         filename, ext = os.path.splitext(args.input_file)
+        intermediate_file = f"{filename}_translated_raw{ext}"
+        processor.save(intermediate_file)
+
+        print("Adjusting layout...")
+        # Layout Adjustment Phase
+        adjuster = LayoutAdjuster(intermediate_file)
+        adjuster.adjust()
+
         output_file = f"{filename}_translated{ext}"
-        processor.save(output_file)
+        adjuster.save(output_file)
+
+        # Clean up intermediate file
+        if os.path.exists(intermediate_file):
+            os.remove(intermediate_file)
 
         print(f"Done! Saved translated file to '{output_file}'.")
 
