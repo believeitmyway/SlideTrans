@@ -87,11 +87,18 @@ class LayoutAdjuster:
     def _adjust_table(self, shape):
         for row in shape.table.rows:
             row_height = row.height
-            for cell in row.cells:
+            for col_idx, cell in enumerate(row.cells):
                 if cell.text_frame:
                     cell.text_frame.word_wrap = True
                     # Check against cell width and row height
-                    self._apply_manual_fit(cell.text_frame, cell.width, row_height)
+                    # cell width must be accessed via the column
+                    try:
+                        cell_width = shape.table.columns[col_idx].width
+                    except:
+                        # Fallback if something is weird, though it should exist
+                        cell_width = 0
+
+                    self._apply_manual_fit(cell.text_frame, cell_width, row_height)
 
     def _adjust_group(self, group_shape):
         for shape in group_shape.shapes:
