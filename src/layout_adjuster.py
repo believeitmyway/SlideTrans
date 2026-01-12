@@ -1,6 +1,6 @@
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.util import Pt
 from tqdm import tqdm
 
 class LayoutAdjuster:
@@ -22,9 +22,6 @@ class LayoutAdjuster:
         # We need to collect all shapes first to do collision detection
         shapes = list(slide.shapes)
 
-        # Sort shapes by x position to help find neighbors?
-        # A simple O(N^2) check is fine for typical slide shape counts (~10-50).
-
         for shape in shapes:
             if shape.has_text_frame:
                 self._adjust_text_box(shape, shapes, slide.slide_layout)
@@ -40,12 +37,6 @@ class LayoutAdjuster:
         if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
             return
 
-        # Strategy:
-        # 1. Calculate current bounding box.
-        # 2. Look for space to the right.
-        # 3. Expand width.
-        # 4. Set AutoFit.
-
         try:
             current_left = shape.left
             current_top = shape.top
@@ -54,7 +45,6 @@ class LayoutAdjuster:
             current_right = current_left + current_width
 
             # Find nearest obstruction to the right
-            # Slide width constraint
             slide_width = self.prs.slide_width
             max_right = slide_width
 
@@ -64,65 +54,130 @@ class LayoutAdjuster:
                     continue
 
                 # Simple AABB collision check for "in the same horizontal band"
-                # If other is to the right of current
                 if other.left >= current_right:
-                    # And vertically overlaps
                     if not (other.top + other.height < current_top or other.top > current_top + current_height):
-                        # It is a candidate obstruction
                         if other.left < max_right:
                             max_right = other.left
 
             # Calculate new width
-            # Leave a small margin (e.g., 10px or 0.1 inch)
-            margin = 91440 # 1 inch = 914400 EMUs. 0.1 inch margin.
+            # Leave a small margin (e.g., 0.1 inch)
+            margin = 91440
             available_width = max_right - current_left - margin
 
+            # 1. Widen the shape if possible
             if available_width > current_width:
                 shape.width = int(available_width)
 
-            # Enable AutoFit "Shrink text on overflow"
-            # TEXT_TO_FIT_SHAPE = 1
-
-            # Ensure word wrap is on
+            # Ensure word wrap is on (important for multi-line calculation)
             shape.text_frame.word_wrap = True
 
-            # Clear explicit font sizes to force AutoFit recalculation
-            self._clear_explicit_font_sizing(shape.text_frame)
-
-            shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            # 2. Manual Font Scaling
+            self._apply_manual_fit(shape.text_frame, shape.width)
 
         except Exception as e:
             # print(f"Error adjusting shape: {e}")
             pass
 
     def _adjust_table(self, shape):
-        # For tables, we do not change width.
-        # We strictly want to ensure text fits.
-        # python-pptx support for table auto-fit is limited.
-        # We can try setting the property on the text frame of each cell.
-
         for row in shape.table.rows:
             for cell in row.cells:
                 if cell.text_frame:
                     cell.text_frame.word_wrap = True
-                    self._clear_explicit_font_sizing(cell.text_frame)
-                    cell.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+                    # Check against cell width
+                    self._apply_manual_fit(cell.text_frame, cell.width)
 
     def _adjust_group(self, group_shape):
         for shape in group_shape.shapes:
              if shape.has_text_frame:
-                 # Recursive adjustment?
-                 # Collision detection inside groups is hard because coordinates might be relative or transformed.
-                 # Safest bet: Just set AutoFit.
                  shape.text_frame.word_wrap = True
-                 self._clear_explicit_font_sizing(shape.text_frame)
-                 shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+                 self._apply_manual_fit(shape.text_frame, shape.width)
 
-    def _clear_explicit_font_sizing(self, text_frame):
+    def _apply_manual_fit(self, text_frame, available_width):
         """
-        Clears explicit font sizes from all runs in the text frame.
-        This allows PowerPoint's AutoFit engine to take over control of the font size.
+        Estimates text width and shrinks font if it exceeds available_width.
+        """
+        if not available_width or available_width <= 0:
+            return
+
+        text_width = self._estimate_text_width(text_frame)
+
+        if text_width > available_width:
+            ratio = available_width / text_width
+            # Apply a small buffer to be safe (e.g., 95%)
+            safe_ratio = ratio * 0.95
+            self._scale_font_size(text_frame, safe_ratio)
+
+    def _estimate_text_width(self, text_frame):
+        """
+        Estimates the visual width of the longest line in the text frame in EMUs.
+        """
+        max_line_width = 0
+        current_line_width = 0
+
+        # We need to handle paragraphs and possible soft breaks.
+        # Ideally, we iterate runs.
+        # But separate paragraphs implies new lines.
+
+        for paragraph in text_frame.paragraphs:
+            # Reset line width for new paragraph
+            # But wait, what if the previous paragraph didn't end with a newline?
+            # In PPT, paragraphs are block elements. They always start on a new line.
+            if current_line_width > max_line_width:
+                max_line_width = current_line_width
+            current_line_width = 0
+
+            for run in paragraph.runs:
+                font_size = run.font.size
+                if font_size is None:
+                    font_size = Pt(18) # Default fallback
+
+                # Calculate width of this run
+                # Check for manual newlines in text (though normally run text doesn't contain \n unless explicitly added)
+                text = run.text
+
+                # Split by newline if present (preservation logic might put \n in runs)
+                parts = text.split('\n')
+
+                for i, part in enumerate(parts):
+                    if i > 0:
+                        # New line started
+                        if current_line_width > max_line_width:
+                            max_line_width = current_line_width
+                        current_line_width = 0
+
+                    # Calculate width of part
+                    part_width = 0
+                    for char in part:
+                        # Estimate width: Wide ~ 1.0 * Size, Narrow ~ 0.5 * Size
+                        # 1 pt = 12700 EMUs
+                        is_wide = ord(char) > 255
+                        factor = 1.0 if is_wide else 0.55 # 0.55 is a bit safer for variable width fonts
+                        char_width = font_size.pt * 12700 * factor
+                        part_width += char_width
+
+                    current_line_width += part_width
+
+        if current_line_width > max_line_width:
+            max_line_width = current_line_width
+
+        return max_line_width
+
+    def _scale_font_size(self, text_frame, ratio):
+        """
+        Multiplies the font size of all runs by the ratio.
         """
         for paragraph in text_frame.paragraphs:
             for run in paragraph.runs:
-                run.font.size = None
+                if run.font.size:
+                    new_size = run.font.size.pt * ratio
+                    # Set minimum size limit? (e.g. 6pt)
+                    if new_size < 6:
+                        new_size = 6
+                    run.font.size = Pt(new_size)
+                else:
+                    # If size was None (inherited), set it to scaled default
+                    # Default 18pt * ratio
+                    new_size = 18 * ratio
+                    if new_size < 6:
+                        new_size = 6
+                    run.font.size = Pt(new_size)
