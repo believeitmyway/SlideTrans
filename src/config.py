@@ -18,7 +18,16 @@ class Config:
 
     @property
     def translation_prompt(self):
-        return self._config.get("translation", {}).get("prompt", "")
+        # Fallback for backward compatibility or default
+        return self.presentation_body_prompt
+
+    @property
+    def presentation_body_prompt(self):
+        return self._config.get("translation", {}).get("presentation_body_prompt", "")
+
+    @property
+    def constrained_text_prompt(self):
+        return self._config.get("translation", {}).get("constrained_text_prompt", "")
 
     @property
     def source_language(self):

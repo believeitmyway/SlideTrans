@@ -75,11 +75,12 @@ class Translator:
             print(f"Error during translation: {e}")
             return text
 
-    def translate_batch(self, items: list) -> list:
+    def translate_batch(self, items: list, system_prompt_template: str = None) -> list:
         """
         Translates a batch of items.
         Input: list of {"id": int, "text": str, "max_chars": int}
         Output: list of {"id": int, "text": str}
+        system_prompt_template: Optional string to override the default prompt.
         """
         if not items:
             return []
@@ -95,9 +96,43 @@ class Translator:
 
         user_content = json.dumps(prompt_items, ensure_ascii=False)
 
+        # Determine base prompt to use
+        base_prompt_to_use = system_prompt_template if system_prompt_template else self.base_system_prompt
+
+        # If the template wasn't constructed by _build_base_system_prompt (e.g. raw from config),
+        # it might miss the language/glossary instructions.
+        # But _build_base_system_prompt adds them.
+        # Let's assume the caller passes a FULL template or we need to rebuild it?
+        # A simpler way is to pass the raw config string key to this method?
+        # No, better to have a helper to build prompt from a raw string.
+        # BUT for now, let's assume the caller constructs it or we update _build_system_prompt logic.
+
+        # REFACTOR: The caller (PPTXProcessor) has access to Config.
+        # The Translator should expose a method `build_prompt(raw_text)` or similar.
+        # OR simpler: The caller passes the "role" of the text and we select the prompt?
+        # Let's stick to passing the TEMPLATE string from config, but we need to append Lang/Glossary.
+
+        # Correction: self.base_system_prompt ALREADY includes lang/glossary.
+        # If we switch the "base_prompt" part, we need to re-append lang/glossary.
+
+        # Helper logic inline:
+        if system_prompt_template:
+            # We need to append the standard suffix (lang + glossary)
+            # This duplicates logic from _build_base_system_prompt.
+            # Let's extract the suffix.
+            lang_instruction = f" Translate from {self.config.source_language} to {self.config.target_language}."
+            glossary_instruction = ""
+            if self.glossary:
+                glossary_instruction = "\n\nUse the following glossary for translation:\n"
+                for term, translation in self.glossary.items():
+                    glossary_instruction += f"- {term}: {translation}\n"
+
+            current_prompt = system_prompt_template + lang_instruction + glossary_instruction
+        else:
+            current_prompt = self.base_system_prompt
+
         # Inject instruction for batching
-        # We replace {max_chars} with a reference to the JSON field
-        system_prompt = self.base_system_prompt.replace("{max_chars}", "the limit specified in the 'max_chars' field")
+        system_prompt = current_prompt.replace("{max_chars}", "the limit specified in the 'max_chars' field")
 
         system_prompt += "\n\nProcess the following JSON list. Return a JSON list of objects with 'id' and 'text' (translated content). Maintain the same IDs."
 
@@ -162,7 +197,7 @@ class MockTranslator:
             return f"{tag_open}[EN] {content}{tag_close}"
         return pattern.sub(replace_match, text)
 
-    def translate_batch(self, items: list) -> list:
+    def translate_batch(self, items: list, system_prompt_template: str = None) -> list:
         """
         Simulates batch translation.
         """
