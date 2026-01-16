@@ -1,4 +1,5 @@
 import unittest
+import json
 from unittest.mock import MagicMock, patch
 from src.pptx_processor import PPTXProcessor
 from src.translator import Translator
@@ -16,6 +17,7 @@ class TestPPTXProcessor(unittest.TestCase):
         self.mock_config.target_language = "English"
         self.mock_config.presentation_body_prompt = "Mock Body Prompt"
         self.mock_config.constrained_text_prompt = "Mock Constrained Prompt"
+        self.mock_config.expansion_ratio = 1.7
 
         # Create a mock translator
         self.mock_translator = MagicMock(spec=Translator)
@@ -33,14 +35,9 @@ class TestPPTXProcessor(unittest.TestCase):
         run.font.bold = True
         run.font.italic = False
         run.font.underline = False
-        run.font.strike = False  # Explicitly set strike to False
+        run.font.strike = False
         run.font.size.pt = None
         run.font.color.type = None
-
-        # NOTE: When using MagicMock for pptx objects, accessing properties often returns a new MagicMock unless specified.
-        # Ensure 'strike' resolves to False-y, not a Mock object (which is truthy).
-        # We need to ensure getattr(run.font, 'strike') returns False.
-        # But run.font.strike = False is safer.
 
         html_out = self.processor._run_to_html(run)
         self.assertEqual(html_out, "<b>Hello</b>")
@@ -65,13 +62,6 @@ class TestPPTXProcessor(unittest.TestCase):
         self.assertEqual(new_run.text, "BoldText")
         self.assertEqual(new_run.font.bold, True)
 
-        # Verify size setting (we need to mock Pt or check call args)
-        # In implementation: run.font.size = Pt(style["font_size"])
-        # Since we didn't patch Pt here, it will try to call real Pt.
-        # But we haven't imported Pt in the test file scope effectively for the module being tested unless we patch it inside module.
-        # Actually pptx.util.Pt is imported in src.pptx_processor.
-        # We can check if new_run.font.size was set.
-
     def test_calculate_max_chars(self):
         # Case 1: Japanese to English (Ratio 1.7)
         self.mock_config.source_language = "Japanese"
@@ -89,9 +79,12 @@ class TestPPTXProcessor(unittest.TestCase):
 class TestTranslator(unittest.TestCase):
     @patch("src.translator.AzureOpenAI")
     def test_translate_text(self, mock_azure):
+        # Setup Config
         config = MagicMock(spec=Config)
         config.azure_openai = {"api_key": "dummy", "endpoint": "dummy", "api_version": "dummy"}
+        # Ensure prompts are actual strings
         config.translation_prompt = "Translate this: {max_chars}"
+        config.presentation_body_prompt = "Translate body: {max_chars}"
         config.source_language = "Japanese"
         config.target_language = "English"
 
@@ -116,3 +109,43 @@ class TestTranslator(unittest.TestCase):
 
         self.assertIn("100", system_prompt) # max_chars injected
         self.assertIn("TermA: TransA", system_prompt) # Glossary injected
+
+    @patch("src.translator.AzureOpenAI")
+    def test_translate_batch(self, mock_azure):
+        # Setup Config
+        config = MagicMock(spec=Config)
+        config.azure_openai = {"api_key": "dummy", "endpoint": "dummy", "api_version": "dummy"}
+        config.target_language = "English"
+
+        glossary = {"TermA": "TransA"}
+        translator = Translator(config, glossary)
+
+        # Mock API Response
+        mock_response = MagicMock()
+        # Return a JSON list
+        mock_output = [
+            {"id": 0, "translation": "T1"},
+            {"id": 1, "translation": "T2"}
+        ]
+        mock_response.choices[0].message.content = json.dumps(mock_output)
+        translator.client.chat.completions.create.return_value = mock_response
+
+        # Input
+        items = [
+            {"id": 0, "text": "S1", "limit": 10},
+            {"id": 1, "text": "S2", "limit": 10}
+        ]
+
+        # Execute
+        result = translator.translate_batch(items, system_prompt_template="Translate {target_language}")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["translation"], "T1")
+        self.assertEqual(result[1]["translation"], "T2")
+
+        # Verify System Prompt Injection
+        call_args = translator.client.chat.completions.create.call_args
+        messages = call_args.kwargs['messages']
+        system_prompt = messages[0]['content']
+        self.assertIn("English", system_prompt)
+        self.assertIn("TermA: TransA", system_prompt)
