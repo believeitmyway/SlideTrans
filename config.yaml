@@ -9,5 +9,42 @@ translation:
   target_language: "English"
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
-  presentation_body_prompt: "You are a professional translator. The text is part of a presentation slide. Translate the text to {target_language}. The input text uses HTML tags for formatting (e.g., <b>bold</b>, <span style=\"color:...\">). You MUST preserve these HTML tags and attributes exactly in the translated output. Do not lose any formatting. Keep the translation simple and concise. Limit the translation to approximately {max_chars} characters."
-  constrained_text_prompt: "You are a professional translator. The text is inside a table or constrained shape. Translate the text to {target_language}. The input text uses HTML tags for formatting. You MUST preserve these HTML tags and attributes exactly. Priority #1 is to fit the text within the layout. Summarize drastically if necessary to keep the translation under {max_chars} characters. Do not allow text overflow."
+  presentation_body_prompt: |
+    You are a professional translator. The text is part of a presentation slide.
+    You will receive a JSON array of objects. Each object contains:
+    - "id": A unique identifier.
+    - "text": The text to translate (may contain HTML tags).
+    - "limit": The maximum number of characters allowed for the translation.
+
+    Your task:
+    1. Translate the "text" field to {target_language}.
+    2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">) exactly.
+    3. Keep the translation simple and concise.
+    4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
+    5. Return a JSON array of objects with the following structure:
+       [
+         {"id": 0, "translation": "Translated text here..."},
+         {"id": 1, "translation": "..."}
+       ]
+    6. Ensure the order and IDs match the input exactly. Do not add or remove items.
+    7. Output ONLY the JSON array. Do not include markdown formatting (like ```json).
+
+  constrained_text_prompt: |
+    You are a professional translator. The text is inside a table or constrained shape.
+    You will receive a JSON array of objects. Each object contains:
+    - "id": A unique identifier.
+    - "text": The text to translate (may contain HTML tags).
+    - "limit": The maximum number of characters allowed for the translation.
+
+    Your task:
+    1. Translate the "text" field to {target_language}.
+    2. Preserve all HTML tags and attributes exactly.
+    3. Priority #1 is to fit the text within the layout. Drastically summarize if necessary to meet the "limit".
+    4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
+    5. Return a JSON array of objects with the following structure:
+       [
+         {"id": 0, "translation": "Translated text here..."},
+         {"id": 1, "translation": "..."}
+       ]
+    6. Ensure the order and IDs match the input exactly. Do not add or remove items.
+    7. Output ONLY the JSON array. Do not include markdown formatting (like ```json).

@@ -72,28 +72,83 @@ class PPTXProcessor:
 
     def process(self):
         """
-        Iterates through all slides and shapes, processing text sequentially.
+        Iterates through all slides, collecting and translating text in batches per slide.
         """
         total_slides = len(self.prs.slides)
         print(f"Processing {total_slides} slides...")
 
-        # We need to count tasks first for progress bar?
-        # Or just iterate and be patient. Sequential processing is slower, so progress bar is good.
-        # But counting requires full traversal. Let's do a generator or simple count.
-        # Let's just process slide by slide and update tqdm per slide? Or per shape.
-        # Per shape is better granularity.
+        for i, slide in enumerate(tqdm(self.prs.slides, desc="Translating Slides")):
+            self._process_slide(slide, slide_index=i)
 
-        # To keep it simple and robust, let's collect all translate-able items first (just pointers),
-        # then process them.
-        all_tasks = []
-        for slide in self.prs.slides:
-            for shape in slide.shapes:
-                self._collect_tasks(shape, all_tasks)
+    def _process_slide(self, slide, slide_index):
+        # Collect tasks for this slide
+        tasks = []
+        for shape in slide.shapes:
+            self._collect_tasks(shape, tasks)
 
-        print(f"Found {len(all_tasks)} text items to translate.")
+        if not tasks:
+            return
 
-        for task in tqdm(all_tasks, desc="Translating"):
-            self._process_single_task(task)
+        # Separate into Standard and Constrained batches
+        standard_tasks = [t for t in tasks if t['context'] == 'standard']
+        constrained_tasks = [t for t in tasks if t['context'] == 'constrained']
+
+        if standard_tasks:
+            self._process_batch(standard_tasks, self.translator.config.presentation_body_prompt, f"Slide {slide_index+1} (Standard)")
+
+        if constrained_tasks:
+            self._process_batch(constrained_tasks, self.translator.config.constrained_text_prompt, f"Slide {slide_index+1} (Constrained)")
+
+    def _process_batch(self, tasks, prompt_template, description):
+        batch_items = []
+
+        # Prepare Batch
+        for i, task in enumerate(tasks):
+            paragraph = task["paragraph"]
+            html_text = self._paragraph_to_html(paragraph)
+
+            # Skip empty
+            if not html_text.strip():
+                continue
+
+            raw_text_length = len("".join([r.text for r in paragraph.runs]))
+            max_chars = self._calculate_max_chars(raw_text_length)
+
+            batch_items.append({
+                "id": i,
+                "text": html_text,
+                "limit": max_chars,
+                "_task_ref": task # Keep reference to original task
+            })
+
+        if not batch_items:
+            return
+
+        # Remove _task_ref before sending to LLM
+        llm_payload = [{k: v for k, v in item.items() if k != "_task_ref"} for item in batch_items]
+
+        # Translate
+        translated_items = self.translator.translate_batch(llm_payload, prompt_template)
+
+        # Validate
+        if len(translated_items) != len(batch_items):
+            print(f"\n[Error] {description}: Batch count mismatch. Sent {len(batch_items)}, received {len(translated_items)}. Skipping.")
+            return
+
+        # Sort by ID to ensure alignment (though LLM should preserve order, IDs are safer)
+        # We assume the LLM returns IDs.
+        translated_map = {item.get("id"): item.get("translation") for item in translated_items}
+
+        # Apply Translations
+        for item in batch_items:
+            t_id = item["id"]
+            if t_id not in translated_map:
+                print(f"\n[Error] {description}: ID {t_id} missing in response. Skipping item.")
+                continue
+
+            translated_text = translated_map[t_id]
+            paragraph = item["_task_ref"]["paragraph"]
+            self._reconstruct_paragraph(paragraph, translated_text)
 
     def _collect_tasks(self, shape, task_list, context="standard"):
         # Handle Groups (Recursive)
@@ -124,32 +179,6 @@ class PPTXProcessor:
                 "paragraph": paragraph,
                 "context": context
             })
-
-    def _process_single_task(self, task):
-        paragraph = task["paragraph"]
-        context = task["context"]
-
-        # 1. Convert to HTML
-        html_text = self._paragraph_to_html(paragraph)
-        if not html_text:
-            return
-
-        # 2. Calculate limits
-        raw_text_length = len("".join([r.text for r in paragraph.runs]))
-        max_chars = self._calculate_max_chars(raw_text_length)
-
-        # 3. Select Prompt
-        if context == "constrained":
-            prompt_template = self.translator.config.constrained_text_prompt
-        else:
-            prompt_template = self.translator.config.presentation_body_prompt
-
-        # 4. Translate
-        translated_html = self.translator.translate_text(html_text, max_chars, prompt_template)
-
-        # 5. Reconstruct
-        if translated_html:
-            self._reconstruct_paragraph(paragraph, translated_html)
 
     def _paragraph_to_html(self, paragraph):
         """
@@ -213,15 +242,18 @@ class PPTXProcessor:
         return result
 
     def _reconstruct_paragraph(self, paragraph, html_text):
+        if not html_text:
+            return
+
         # Parse HTML
         parser = HTMLRunParser()
         try:
             parser.feed(html_text)
         except Exception as e:
             print(f"HTML Parse Error: {e} | Text: {html_text}")
-            # Fallback: Just set text if parse fails?
+            # Fallback: Just set text if parse fails
             paragraph.clear()
-            paragraph.add_run().text = html.unescape(html_text) # Strip tags implicitly? No.
+            paragraph.add_run().text = html.unescape(html_text)
             return
 
         parsed_runs = parser.runs
@@ -241,7 +273,6 @@ class PPTXProcessor:
         run.font.italic = style["italic"]
         run.font.underline = style["underline"]
         if style["strike"]:
-            # Try setting strikethrough
             try:
                 if hasattr(run.font, 'strike'):
                     run.font.strike = True
