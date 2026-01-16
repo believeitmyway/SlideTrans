@@ -19,15 +19,16 @@ translation:
     Your task:
     1. Translate the "text" field to {target_language}.
     2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">, <br>, data-pptx-*) exactly.
-    3. Keep the translation simple and concise.
-    4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
-    5. Return a JSON array of objects with the following structure:
+    3. STRICTLY preserve whitespace (spaces) around tags. Do not delete spaces before or after tags like <u>, <b>, <span>.
+    4. Keep the translation simple and concise.
+    5. Ensure the translated text length does NOT exceed the "limit" specified for that item.
+    6. Return a JSON array of objects with the following structure:
        [
          {"id": 0, "translation": "Translated text here..."},
          {"id": 1, "translation": "..."}
        ]
-    6. Ensure the order and IDs match the input exactly. Do not add or remove items.
-    7. Output ONLY the JSON array. Do not include markdown formatting (like ```json).
+    7. Ensure the order and IDs match the input exactly. Do not add or remove items.
+    8. Output ONLY the JSON array. Do not include markdown formatting (like ```json).
 
   constrained_text_prompt: |
     You are a professional translator. The text is inside a table or constrained shape.
@@ -39,12 +40,13 @@ translation:
     Your task:
     1. Translate the "text" field to {target_language}.
     2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">, <br>, data-pptx-*) exactly.
-    3. Priority #1 is to fit the text within the layout. Drastically summarize if necessary to meet the "limit".
-    4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
-    5. Return a JSON array of objects with the following structure:
+    3. STRICTLY preserve whitespace (spaces) around tags. Do not delete spaces before or after tags.
+    4. Priority #1 is to fit the text within the layout. Drastically summarize if necessary to meet the "limit".
+    5. Ensure the translated text length does NOT exceed the "limit" specified for that item.
+    6. Return a JSON array of objects with the following structure:
        [
          {"id": 0, "translation": "Translated text here..."},
          {"id": 1, "translation": "..."}
        ]
-    6. Ensure the order and IDs match the input exactly. Do not add or remove items.
-    7. Output ONLY the JSON array. Do not include markdown formatting (like ```json).
+    7. Ensure the order and IDs match the input exactly. Do not add or remove items.
+    8. Output ONLY the JSON array. Do not include markdown formatting (like ```json).

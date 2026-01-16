@@ -12,7 +12,7 @@ class HTMLRunParser(HTMLParser):
         self.runs = []
         self.current_style = {
             "bold": False, "italic": False, "underline": False, "strike": False,
-            "font_size": None, "color_rgb": None, "theme_color": None
+            "font_size": None, "color_rgb": None, "theme_color": None, "brightness": None
         }
         self.style_stack = []
 
@@ -52,6 +52,12 @@ class HTMLRunParser(HTMLParser):
 
             if "data-pptx-theme-color" in attrs_dict:
                 self.current_style["theme_color"] = attrs_dict["data-pptx-theme-color"]
+
+            if "data-pptx-brightness" in attrs_dict:
+                try:
+                    self.current_style["brightness"] = float(attrs_dict["data-pptx-brightness"])
+                except ValueError:
+                    pass
 
             if tag == "font" and "color" in attrs_dict:
                 c = attrs_dict["color"]
@@ -255,6 +261,8 @@ class PPTXProcessor:
         try:
             if run.font.color.type == 2: # Theme
                 attrs.append(f'data-pptx-theme-color="{run.font.color.theme_color}"')
+                if run.font.color.brightness:
+                    attrs.append(f'data-pptx-brightness="{run.font.color.brightness}"')
         except: pass
 
         if attrs:
@@ -311,6 +319,8 @@ class PPTXProcessor:
         if style["theme_color"]:
             try:
                 run.font.color.theme_color = int(style["theme_color"])
+                if style["brightness"] is not None:
+                    run.font.color.brightness = style["brightness"]
             except: pass
 
     def _calculate_max_chars(self, original_length):
