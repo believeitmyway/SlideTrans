@@ -18,7 +18,7 @@ translation:
 
     Your task:
     1. Translate the "text" field to {target_language}.
-    2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">) exactly.
+    2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">, <br>, data-pptx-*) exactly.
     3. Keep the translation simple and concise.
     4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
     5. Return a JSON array of objects with the following structure:
@@ -38,7 +38,7 @@ translation:
 
     Your task:
     1. Translate the "text" field to {target_language}.
-    2. Preserve all HTML tags and attributes exactly.
+    2. Preserve all HTML tags and attributes (e.g., <b>, <span style="...">, <br>, data-pptx-*) exactly.
     3. Priority #1 is to fit the text within the layout. Drastically summarize if necessary to meet the "limit".
     4. Ensure the translated text length does NOT exceed the "limit" specified for that item.
     5. Return a JSON array of objects with the following structure:

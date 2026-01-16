@@ -20,7 +20,13 @@ class HTMLRunParser(HTMLParser):
         self.style_stack.append(self.current_style.copy())
         attrs_dict = dict(attrs)
 
-        if tag in ["b", "strong"]:
+        if tag == "br":
+            # Treat <br> as data "\x0b" (soft return)
+            self.runs.append({
+                "text": "\x0b",
+                "style": self.current_style.copy()
+            })
+        elif tag in ["b", "strong"]:
             self.current_style["bold"] = True
         elif tag in ["i", "em"]:
             self.current_style["italic"] = True
@@ -52,7 +58,17 @@ class HTMLRunParser(HTMLParser):
                 if c.startswith("#"):
                     self.current_style["color_rgb"] = c.replace("#", "").upper()
 
+    def handle_startendtag(self, tag, attrs):
+        # Handle <br /> self-closing
+        if tag == "br":
+             self.runs.append({
+                "text": "\x0b",
+                "style": self.current_style.copy()
+            })
+
     def handle_endtag(self, tag):
+        if tag == "br":
+            return # Ignore </br> if it exists, or handled in starttag
         if self.style_stack:
             self.current_style = self.style_stack.pop()
 
@@ -190,9 +206,14 @@ class PPTXProcessor:
         return "".join(parts)
 
     def _run_to_html(self, run):
+        # Escape HTML first
         text = html.escape(run.text)
         if not text:
             return ""
+
+        # Convert line breaks/soft returns to <br> to ensure LLM visibility and preservation
+        # _x000B_ is the string representation of \x0b in python-pptx text runs sometimes
+        text = text.replace("_x000B_", "<br>").replace("\x0b", "<br>").replace("\n", "<br>").replace("\r", "<br>")
 
         style_parts = []
 
