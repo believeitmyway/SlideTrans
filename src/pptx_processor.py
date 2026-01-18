@@ -34,35 +34,32 @@ class HTMLRunParser(HTMLParser):
             self.current_style["underline"] = True
         elif tag in ["s", "strike", "del"]:
             self.current_style["strike"] = True
-        elif tag in ["span", "font"]:
-            style_str = attrs_dict.get("style", "")
-            styles = [s.strip().split(":") for s in style_str.split(";") if ":" in s]
-            for k, v in styles:
-                k = k.strip().lower()
-                v = v.strip().lower()
-                if k == "font-size":
-                    if "pt" in v:
-                        try:
-                            self.current_style["font_size"] = float(v.replace("pt", ""))
-                        except ValueError:
-                            pass
-                elif k == "color":
-                    if v.startswith("#"):
-                        self.current_style["color_rgb"] = v.replace("#", "").upper()
-
-            if "data-pptx-theme-color" in attrs_dict:
-                self.current_style["theme_color"] = attrs_dict["data-pptx-theme-color"]
-
-            if "data-pptx-brightness" in attrs_dict:
+        # Parse new tags: <c v="...">, <sz v="...">
+        elif tag == "c":
+            val = attrs_dict.get("v", "")
+            if val.startswith("#"):
+                # RGB
+                self.current_style["color_rgb"] = val.replace("#", "").upper()
+            elif val.startswith("T"):
+                # Theme: T1 or T1:0.5
+                parts = val[1:].split(":")
                 try:
-                    self.current_style["brightness"] = float(attrs_dict["data-pptx-brightness"])
+                    self.current_style["theme_color"] = int(parts[0])
+                    if len(parts) > 1:
+                        self.current_style["brightness"] = float(parts[1])
                 except ValueError:
                     pass
 
-            if tag == "font" and "color" in attrs_dict:
-                c = attrs_dict["color"]
-                if c.startswith("#"):
-                    self.current_style["color_rgb"] = c.replace("#", "").upper()
+        elif tag == "sz":
+            val = attrs_dict.get("v", "")
+            try:
+                self.current_style["font_size"] = float(val)
+            except ValueError:
+                pass
+
+        # Legacy parsing support (optional, but good for robustness if mixed)
+        elif tag in ["span", "font"]:
+             pass # Ignore legacy for now to force new schema usage
 
     def handle_startendtag(self, tag, attrs):
         # Handle <br /> self-closing
@@ -221,21 +218,34 @@ class PPTXProcessor:
         # _x000B_ is the string representation of \x0b in python-pptx text runs sometimes
         text = text.replace("_x000B_", "<br>").replace("\x0b", "<br>").replace("\n", "<br>").replace("\r", "<br>")
 
-        style_parts = []
+        # Color & Size Attributes
+        c_tag = None
+        sz_tag = None
 
-        # Size
-        if run.font.size and run.font.size.pt:
-            style_parts.append(f"font-size:{int(run.font.size.pt)}pt")
-
-        # Color
+        # 1. Color (c tag)
         try:
             if run.font.color.type == 1: # RGB
-                style_parts.append(f"color:#{run.font.color.rgb}")
+                c_tag = f'<c v="#{run.font.color.rgb}">'
+            elif run.font.color.type == 2: # Theme
+                # Format: T<id> or T<id>:<brightness>
+                t_val = f"T{run.font.color.theme_color}"
+                if run.font.color.brightness:
+                     t_val += f":{run.font.color.brightness}"
+                c_tag = f'<c v="{t_val}">'
         except:
-            pass # Ignore color errors
+            pass
+
+        # 2. Size (sz tag)
+        if run.font.size and run.font.size.pt:
+            sz_tag = f'<sz v="{int(run.font.size.pt)}">'
 
         # Construct tags
         result = text
+
+        # Apply wrappers (Order: Size, Color, Bold, Italic, Underline, Strike)
+        # Inner-most should be formatting, outer-most structural?
+        # Actually standard HTML nesting doesn't matter too much for parser, but shorter first.
+
         if run.font.bold:
             result = f"<b>{result}</b>"
         if run.font.italic:
@@ -244,29 +254,16 @@ class PPTXProcessor:
             if run.font.underline:
                 result = f"<u>{result}</u>"
         except: pass
-
         try:
-            # Check for strikethrough (various properties)
-            strike = False
             if hasattr(run.font, 'strike') and run.font.strike:
-                strike = True
-            if strike:
                 result = f"<s>{result}</s>"
         except: pass
 
-        attrs = []
-        if style_parts:
-            attrs.append(f'style="{"; ".join(style_parts)}"')
+        if c_tag:
+            result = f"{c_tag}{result}</c>"
 
-        try:
-            if run.font.color.type == 2: # Theme
-                attrs.append(f'data-pptx-theme-color="{run.font.color.theme_color}"')
-                if run.font.color.brightness:
-                    attrs.append(f'data-pptx-brightness="{run.font.color.brightness}"')
-        except: pass
-
-        if attrs:
-            result = f"<span {' '.join(attrs)}>{result}</span>"
+        if sz_tag:
+            result = f"{sz_tag}{result}</sz>"
 
         return result
 
