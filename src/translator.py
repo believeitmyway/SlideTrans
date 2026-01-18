@@ -37,12 +37,10 @@ class Translator:
             print(f"Failed to write debug log: {e}")
 
     def translate_text(self, text: str, max_chars: int = None, system_prompt_template: str = None) -> str:
-        # Kept for compatibility if needed, though we primarily use translate_batch now.
+        # Kept for compatibility/fallback.
         if not text or text.strip() == "":
             return text
 
-        # This method assumes singular translation, might not be used in new flow
-        # But leaving it intact just in case
         base_prompt = system_prompt_template if system_prompt_template else self.config.presentation_body_prompt
         limit_str = str(max_chars) if max_chars is not None else "reasonable limit"
         system_prompt = base_prompt.replace("{max_chars}", limit_str)
@@ -76,8 +74,8 @@ class Translator:
 
     def translate_batch(self, items: list, system_prompt_template: str) -> list:
         """
-        Translates a batch of text items (JSON list).
-        items: List of dicts [{"id":..., "text":..., "limit":...}]
+        Translates a batch of text items using plain text format:
+        ID ::: LIMIT ::: TEXT
         """
         if not items:
             return []
@@ -93,8 +91,13 @@ class Translator:
                 glossary_instruction += f"- {term}: {translation}\n"
             system_prompt += glossary_instruction
 
-        # Prepare User Content (JSON)
-        user_content = json.dumps(items, ensure_ascii=False)
+        # Prepare User Content (Text Format)
+        # item keys: id, text, limit
+        lines = []
+        for item in items:
+            line = f"{item['id']} ::: {item['limit']} ::: {item['text']}"
+            lines.append(line)
+        user_content = "\n".join(lines)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -110,34 +113,24 @@ class Translator:
             content = response.choices[0].message.content
             self._log_debug(messages, content)
 
-            # Parse JSON
-            try:
-                # The LLM should return a JSON object containing the array, or just the array.
-                # Since we asked for a JSON array in the prompt, it might be wrapped or just the list.
-                # However, with response_format={"type": "json_object"}, the model is forced to generate a valid JSON object.
-                # The prompt asks for a JSON array.
-                # Note: 'json_object' mode requires the output to be a valid JSON object (dict), not list.
-                # If the prompt asks for an array, 'json_object' mode might complain or force a wrapper.
-                # Actually, standard JSON mode usually expects a root object {}.
-                # Let's check the prompt again. I asked for a JSON array.
-                # If I use response_format={"type": "json_object"}, I must ensure the prompt asks for a JSON object.
-                # Or I can remove response_format constraint if I want a raw list.
-                # Given the user wants "Simple", maybe I should just rely on text output and parse it.
-                # But let's try to be robust.
-                # Let's NOT use response_format={"type": "json_object"} if we want a list.
-                # I will remove response_format to allow a top-level array.
-                parsed = json.loads(content)
-                if isinstance(parsed, dict) and "translations" in parsed:
-                    # Handle case where LLM wraps it
-                    return parsed["translations"]
-                if isinstance(parsed, list):
-                    return parsed
-                # If it's a dict but we expected a list, maybe it wrapped it differently?
-                print(f"Unexpected JSON structure: {type(parsed)}")
-                return []
-            except json.JSONDecodeError:
-                print(f"Failed to decode JSON response: {content}")
-                return []
+            # Parse Text Response
+            # Expected format: ID ::: TRANSLATION
+            translated_items = []
+            for line in content.splitlines():
+                if ":::" not in line:
+                    continue
+                parts = line.split(":::", 1)
+                if len(parts) < 2:
+                    continue
+
+                try:
+                    t_id = int(parts[0].strip())
+                    t_text = parts[1].strip()
+                    translated_items.append({"id": t_id, "translation": t_text})
+                except ValueError:
+                    continue
+
+            return translated_items
 
         except Exception as e:
             print(f"Error during batch translation: {e}")
@@ -166,6 +159,7 @@ class MockTranslator:
             print(f"Failed to write debug log: {e}")
 
     def translate_text(self, text: str, max_chars: int = None, system_prompt_template: str = None) -> str:
+        # Regex-based simple translation simulation
         # Matches >text<
         def replace_text(match):
             content = match.group(2)
@@ -182,15 +176,22 @@ class MockTranslator:
 
     def translate_batch(self, items: list, system_prompt_template: str) -> list:
         """
-        Simulates batch translation.
+        Simulates batch translation with text format.
         """
         translated_items = []
+        response_lines = []
+
         for item in items:
             t_text = self.translate_text(item["text"])
             translated_items.append({
                 "id": item["id"],
                 "translation": t_text
             })
+            response_lines.append(f"{item['id']} ::: {t_text}")
 
-        self._log_debug([{"role": "user", "content": json.dumps(items)}], json.dumps(translated_items))
+        # Log effectively what we would get back
+        self._log_debug(
+            [{"role": "user", "content": "MOCKED BATCH REQUEST"}],
+            "\n".join(response_lines)
+        )
         return translated_items
