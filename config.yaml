@@ -9,6 +9,7 @@ translation:
   target_language: "English"
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
+  max_parallel_requests: 5
   presentation_body_prompt: |
     You are a professional translator. The text is part of a presentation slide.
     You will receive a list of text items to translate. Each line follows this format:
