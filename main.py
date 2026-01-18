@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to configuration file")
     parser.add_argument("--mock", action="store_true", help="Use mock translator without API calls")
     parser.add_argument("--debug-llm", action="store_true", help="Log LLM prompts and responses to a file")
+    parser.add_argument("--output", help="Path to the output .pptx file")
 
     args = parser.parse_args()
 
@@ -61,7 +62,12 @@ def main():
         adjuster = LayoutAdjuster(intermediate_file)
         adjuster.adjust()
 
-        output_file = f"{filename}_translated{ext}"
+        # Determine Output File
+        if args.output:
+            output_file = args.output
+        else:
+            output_file = f"{filename}_translated{ext}"
+
         adjuster.save(output_file)
 
         # Clean up intermediate file
