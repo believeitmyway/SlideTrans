@@ -74,8 +74,8 @@ class Translator:
 
     def translate_batch(self, items: list, system_prompt_template: str) -> list:
         """
-        Translates a batch of text items using plain text format:
-        ID ::: LIMIT ::: TEXT
+        Translates a batch of text items using XML format:
+        <item id="0" limit="100">Text...</item>
         """
         if not items:
             return []
@@ -91,12 +91,16 @@ class Translator:
                 glossary_instruction += f"- {term}: {translation}\n"
             system_prompt += glossary_instruction
 
-        # Prepare User Content (Text Format)
-        # item keys: id, text, limit
-        lines = []
+        # Prepare User Content (XML Format)
+        lines = ["<list>"]
         for item in items:
-            line = f"{item['id']} ::: {item['limit']} ::: {item['text']}"
+            # Simple XML escaping for attributes/content just in case, though text is already XML-like
+            # But the 'text' field already contains XML-like tags (<c>, <sz>).
+            # We should wrap it directly.
+            # Assuming 'text' is safe or already escaped (html.escape was called).
+            line = f'  <item id="{item["id"]}" limit="{item["limit"]}">{item["text"]}</item>'
             lines.append(line)
+        lines.append("</list>")
         user_content = "\n".join(lines)
 
         messages = [
@@ -113,19 +117,20 @@ class Translator:
             content = response.choices[0].message.content
             self._log_debug(messages, content)
 
-            # Parse Text Response
-            # Expected format: ID ::: TRANSLATION
+            # Parse XML Response
+            # Expected format: <item id="...">Translated</item>
+            # We can use regex to extract content robustly.
+            # <item id="(\d+)">(.+?)</item>
             translated_items = []
-            for line in content.splitlines():
-                if ":::" not in line:
-                    continue
-                parts = line.split(":::", 1)
-                if len(parts) < 2:
-                    continue
 
+            # Simple regex parser
+            pattern = re.compile(r'<item id="(\d+)">\s*(.*?)\s*</item>', re.DOTALL)
+            matches = pattern.findall(content)
+
+            for m in matches:
                 try:
-                    t_id = int(parts[0].strip())
-                    t_text = parts[1].strip()
+                    t_id = int(m[0])
+                    t_text = m[1].strip()
                     translated_items.append({"id": t_id, "translation": t_text})
                 except ValueError:
                     continue
@@ -176,10 +181,10 @@ class MockTranslator:
 
     def translate_batch(self, items: list, system_prompt_template: str) -> list:
         """
-        Simulates batch translation with text format.
+        Simulates batch translation with XML format.
         """
         translated_items = []
-        response_lines = []
+        response_lines = ["<list>"]
 
         for item in items:
             t_text = self.translate_text(item["text"])
@@ -187,7 +192,8 @@ class MockTranslator:
                 "id": item["id"],
                 "translation": t_text
             })
-            response_lines.append(f"{item['id']} ::: {t_text}")
+            response_lines.append(f'  <item id="{item["id"]}">{t_text}</item>')
+        response_lines.append("</list>")
 
         # Log effectively what we would get back
         self._log_debug(

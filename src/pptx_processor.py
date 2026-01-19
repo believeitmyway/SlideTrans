@@ -27,6 +27,11 @@ class HTMLRunParser(HTMLParser):
                 "text": "\x0b",
                 "style": self.current_style.copy()
             })
+        elif tag == "sp":
+             self.runs.append({
+                "text": " ",
+                "style": self.current_style.copy()
+            })
         elif tag in ["b", "strong"]:
             self.current_style["bold"] = True
         elif tag in ["i", "em"]:
@@ -35,6 +40,13 @@ class HTMLRunParser(HTMLParser):
             self.current_style["underline"] = True
         elif tag in ["s", "strike", "del"]:
             self.current_style["strike"] = True
+        elif tag == "sp":
+             # Duplicate check? kept for safety if flow falls through
+             self.runs.append({
+                "text": " ",
+                "style": self.current_style.copy()
+            })
+
         # Parse new tags: <c v="...">, <sz v="...">
         elif tag == "c":
             val = attrs_dict.get("v", "")
@@ -67,6 +79,11 @@ class HTMLRunParser(HTMLParser):
         if tag == "br":
              self.runs.append({
                 "text": "\x0b",
+                "style": self.current_style.copy()
+            })
+        elif tag == "sp":
+             self.runs.append({
+                "text": " ",
                 "style": self.current_style.copy()
             })
 
@@ -237,6 +254,12 @@ class PPTXProcessor:
         # _x000B_ is the string representation of \x0b in python-pptx text runs sometimes
         text = text.replace("_x000B_", "<br>").replace("\x0b", "<br>").replace("\n", "<br>").replace("\r", "<br>")
 
+        # Tag Explicit Spaces at boundaries to prevent word merging
+        if text.startswith(" "):
+            text = "<sp/>" + text[1:]
+        if text.endswith(" "):
+            text = text[:-1] + "<sp/>"
+
         # Color & Size Attributes
         c_tag = None
         sz_tag = None
@@ -247,7 +270,7 @@ class PPTXProcessor:
                 c_tag = f'<c v="#{run.font.color.rgb}">'
             elif run.font.color.type == 2: # Theme
                 # Format: T<id> or T<id>:<brightness>
-                t_val = f"T{run.font.color.theme_color}"
+                t_val = f"T{int(run.font.color.theme_color)}"
                 if run.font.color.brightness:
                      t_val += f":{run.font.color.brightness}"
                 c_tag = f'<c v="{t_val}">'
