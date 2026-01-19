@@ -44,3 +44,7 @@ class Config:
     @property
     def expansion_ratio(self):
         return self._config.get("translation", {}).get("expansion_ratio", 1.0)
+
+    @property
+    def max_parallel_requests(self):
+        return self._config.get("translation", {}).get("max_parallel_requests", 5)

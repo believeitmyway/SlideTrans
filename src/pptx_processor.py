@@ -1,6 +1,7 @@
 import html
 import re
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pptx import Presentation
 from pptx.util import Pt
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -92,12 +93,30 @@ class PPTXProcessor:
     def process(self):
         """
         Iterates through all slides, collecting and translating text in batches per slide.
+        Uses parallel processing (ThreadPoolExecutor) for slides.
         """
         total_slides = len(self.prs.slides)
         print(f"Processing {total_slides} slides...")
 
-        for i, slide in enumerate(tqdm(self.prs.slides, desc="Translating Slides")):
-            self._process_slide(slide, slide_index=i)
+        max_workers = self.translator.config.max_parallel_requests
+        print(f"Using {max_workers} parallel threads.")
+
+        # Prepare arguments for each slide
+        # We need slide object and index.
+        # Note: python-pptx collection isn't indexable like list, but we can enumerate.
+        slide_args = [(slide, i) for i, slide in enumerate(self.prs.slides)]
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_slide = {executor.submit(self._process_slide, slide, idx): idx for slide, idx in slide_args}
+
+            # Iterate as they complete for progress bar
+            for future in tqdm(as_completed(future_to_slide), total=total_slides, desc="Translating Slides"):
+                idx = future_to_slide[future]
+                try:
+                    future.result() # Wait for result (raising exceptions if any)
+                except Exception as e:
+                    print(f"\n[Error] Failed processing Slide {idx + 1}: {e}")
 
     def _process_slide(self, slide, slide_index):
         # Collect tasks for this slide

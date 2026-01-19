@@ -9,48 +9,33 @@ translation:
   target_language: "English"
   glossary_path: "glossary.json"
   expansion_ratio: 1.7
+  max_parallel_requests: 5
   presentation_body_prompt: |
     You are a professional translator. The text is part of a presentation slide.
-    You will receive a JSON array of objects. Each object contains:
-    - "id": A unique identifier.
-    - "text": The text to translate (uses simplified XML tags).
-    - "limit": The maximum number of characters allowed.
+    You will receive a list of text items to translate. Each line follows this format:
+    `ID ::: LIMIT ::: TEXT`
+
+    - `ID`: Unique identifier.
+    - `LIMIT`: Maximum character count for the translation.
+    - `TEXT`: The text to translate (uses simplified XML tags).
 
     Your task:
-    1. Translate the "text" field to {target_language}.
-    2. STRICTLY PRESERVE all tags. Do not remove or modify tags like:
-       - <br>: Line break. CRITICAL: Keep this exactly where it appears.
-       - <b>, <i>, <u>, <s>: Formatting.
-       - <c v="...">: Color.
-       - <sz v="...">: Font size.
-    3. STRICTLY PRESERVE whitespace (spaces) around tags.
-    4. Keep the translation simple and concise.
-    5. Ensure the translated text length does NOT exceed the "limit".
-    6. Return a JSON array of objects with the following structure:
-       [
-         {"id": 0, "translation": "Translated text..."},
-         ...
-       ]
-    7. Ensure order and IDs match exactly.
-    8. Output ONLY the JSON array.
+    1. Translate the `TEXT` part to {target_language}.
+    2. STRICTLY PRESERVE all tags (<c v="...">, <sz v="...">, <br>, <b>, etc.) and whitespace around them.
+    3. Ensure the translation length does not exceed `LIMIT`.
+    4. Output each translation on a new line in this format:
+       `ID ::: TRANSLATED_TEXT`
+    5. Ensure the ID matches the input line exactly. Do not output anything else.
 
   constrained_text_prompt: |
     You are a professional translator. The text is inside a table or constrained shape.
-    You will receive a JSON array of objects. Each object contains:
-    - "id": A unique identifier.
-    - "text": The text to translate (uses simplified XML tags).
-    - "limit": The maximum number of characters allowed.
+    You will receive a list of text items to translate. Each line follows this format:
+    `ID ::: LIMIT ::: TEXT`
 
     Your task:
-    1. Translate the "text" field to {target_language}.
-    2. STRICTLY PRESERVE all tags (<br>, <b>, <c v="...">, etc.).
-    3. STRICTLY PRESERVE whitespace around tags.
-    4. Priority #1 is to fit the text within the layout. Drastically summarize if necessary to meet the "limit".
-    5. Ensure the translated text length does NOT exceed the "limit".
-    6. Return a JSON array of objects with the following structure:
-       [
-         {"id": 0, "translation": "Translated text..."},
-         ...
-       ]
-    7. Ensure order and IDs match exactly.
-    8. Output ONLY the JSON array.
+    1. Translate the `TEXT` part to {target_language}.
+    2. STRICTLY PRESERVE all tags (<br>, <c v="...">, etc.) and whitespace around them.
+    3. Priority #1 is to fit the text within layout. Summarize drastically if needed to meet `LIMIT`.
+    4. Output each translation on a new line in this format:
+       `ID ::: TRANSLATED_TEXT`
+    5. Ensure the ID matches the input line exactly. Do not output anything else.

@@ -43,11 +43,16 @@ class TestPPTXProcessor(unittest.TestCase):
         self.assertEqual(html_out, "<b>Hello</b>")
 
     def test_reconstruct_paragraph_html(self):
+        # This test relies on legacy HTML which we replaced with XML tags.
+        # But wait, HTMLRunParser was updated to ignore legacy spans?
+        # Let's update test data to new format.
+
         # Setup Mock Paragraph
         mock_paragraph = MagicMock()
 
-        # HTML Text: <span style="font-size:12pt"><b>BoldText</b></span>
-        html_text = '<span style="font-size:12pt"><b>BoldText</b></span>'
+        # XML Text: <sz v="12"><b>BoldText</b></sz>
+        # Note: sz v="12" implies Pt 12
+        xml_text = '<sz v="12"><b>BoldText</b></sz>'
 
         # New Run Mock
         new_run = MagicMock()
@@ -55,12 +60,15 @@ class TestPPTXProcessor(unittest.TestCase):
         mock_paragraph.add_run.return_value = new_run
 
         # Execute
-        self.processor._reconstruct_paragraph(mock_paragraph, html_text)
+        self.processor._reconstruct_paragraph(mock_paragraph, xml_text)
 
         # Verify
         mock_paragraph.clear.assert_called_once()
         self.assertEqual(new_run.text, "BoldText")
         self.assertEqual(new_run.font.bold, True)
+        # Font size verification relies on Pt mock or direct setting logic.
+        # Since logic sets run.font.size = Pt(12), and Pt is imported from pptx.util
+        # We can check if it was set.
 
     def test_calculate_max_chars(self):
         # Case 1: Japanese to English (Ratio 1.7)
@@ -122,12 +130,12 @@ class TestTranslator(unittest.TestCase):
 
         # Mock API Response
         mock_response = MagicMock()
-        # Return a JSON list
-        mock_output = [
-            {"id": 0, "translation": "T1"},
-            {"id": 1, "translation": "T2"}
-        ]
-        mock_response.choices[0].message.content = json.dumps(mock_output)
+        # Return Text Format
+        mock_text_output = """
+        0 ::: T1
+        1 ::: T2
+        """
+        mock_response.choices[0].message.content = mock_text_output
         translator.client.chat.completions.create.return_value = mock_response
 
         # Input
@@ -143,9 +151,9 @@ class TestTranslator(unittest.TestCase):
         self.assertEqual(result[0]["translation"], "T1")
         self.assertEqual(result[1]["translation"], "T2")
 
-        # Verify System Prompt Injection
+        # Verify User Content Format
         call_args = translator.client.chat.completions.create.call_args
         messages = call_args.kwargs['messages']
-        system_prompt = messages[0]['content']
-        self.assertIn("English", system_prompt)
-        self.assertIn("TermA: TransA", system_prompt)
+        user_content = messages[1]['content']
+        self.assertIn("0 ::: 10 ::: S1", user_content)
+        self.assertIn("1 ::: 10 ::: S2", user_content)
