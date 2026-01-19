@@ -270,7 +270,7 @@ class PPTXProcessor:
                 c_tag = f'<c v="#{run.font.color.rgb}">'
             elif run.font.color.type == 2: # Theme
                 # Format: T<id> or T<id>:<brightness>
-                t_val = f"T{run.font.color.theme_color}"
+                t_val = f"T{int(run.font.color.theme_color)}"
                 if run.font.color.brightness:
                      t_val += f":{run.font.color.brightness}"
                 c_tag = f'<c v="{t_val}">'
