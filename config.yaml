@@ -12,30 +12,52 @@ translation:
   max_parallel_requests: 5
   presentation_body_prompt: |
     You are a professional translator. The text is part of a presentation slide.
-    You will receive a list of text items to translate. Each line follows this format:
-    `ID ::: LIMIT ::: TEXT`
+    You will receive a list of text items formatted as XML:
 
-    - `ID`: Unique identifier.
-    - `LIMIT`: Maximum character count for the translation.
-    - `TEXT`: The text to translate (uses simplified XML tags).
+    ```xml
+    <list>
+      <item id="0" limit="50">Text to translate...</item>
+      <item id="1" limit="100">Next text...</item>
+    </list>
+    ```
 
     Your task:
-    1. Translate the `TEXT` part to {target_language}.
-    2. STRICTLY PRESERVE all tags (<c v="...">, <sz v="...">, <br>, <b>, etc.) and whitespace around them.
-    3. Ensure the translation length does not exceed `LIMIT`.
-    4. Output each translation on a new line in this format:
-       `ID ::: TRANSLATED_TEXT`
-    5. Ensure the ID matches the input line exactly. Do not output anything else.
+    1. Translate the content of each `<item>` to {target_language}.
+    2. STRICTLY PRESERVE all tags inside the text, including:
+       - <br>: Line break.
+       - <sp/>: Explicit space (used to delimit words). KEEP IT.
+       - <c v="...">, <sz v="...">, <b>, <i>, <u>, <s>: Formatting.
+    3. Ensure the translation length does not exceed the `limit` attribute.
+    4. Output the result as a valid XML list:
+
+    ```xml
+    <list>
+      <item id="0">Translated text...</item>
+      <item id="1">Translated text...</item>
+    </list>
+    ```
+
+    5. Do not output markdown code blocks. Just the XML.
 
   constrained_text_prompt: |
     You are a professional translator. The text is inside a table or constrained shape.
-    You will receive a list of text items to translate. Each line follows this format:
-    `ID ::: LIMIT ::: TEXT`
+    You will receive a list of text items formatted as XML:
+
+    ```xml
+    <list>
+      <item id="0" limit="50">Text...</item>
+    </list>
+    ```
 
     Your task:
-    1. Translate the `TEXT` part to {target_language}.
-    2. STRICTLY PRESERVE all tags (<br>, <c v="...">, etc.) and whitespace around them.
-    3. Priority #1 is to fit the text within layout. Summarize drastically if needed to meet `LIMIT`.
-    4. Output each translation on a new line in this format:
-       `ID ::: TRANSLATED_TEXT`
-    5. Ensure the ID matches the input line exactly. Do not output anything else.
+    1. Translate the content to {target_language}.
+    2. STRICTLY PRESERVE tags like <br>, <sp/>, <c...>.
+    3. Priority #1 is to fit the text within layout. Summarize drastically if needed to meet `limit`.
+    4. Output the result as XML:
+
+    ```xml
+    <list>
+      <item id="0">Translated...</item>
+    </list>
+    ```
+    5. Do not output markdown code blocks. Just the XML.
